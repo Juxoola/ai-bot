@@ -6,6 +6,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
+# Создаём директорию для базы данных и устанавливаем права доступа
+RUN mkdir -p /data && chmod 777 /data
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
