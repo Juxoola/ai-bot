@@ -34,8 +34,5 @@ aiofiles
 aiogram
 pymupdf
 aiosqlite
-faster_whisper
-lingua-language-detector
-translate
 spacy
 google.genai

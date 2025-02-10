@@ -27,8 +27,6 @@ from aiogram import types, F
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
-
-
 logging.basicConfig(level=logging.INFO)
 
 
