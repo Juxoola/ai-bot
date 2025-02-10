@@ -1,0 +1,16 @@
+services:
+  bot:
+    dns:
+      - 83.220.169.155
+    build: .
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      GLHF_API_KEY: ${GLHF_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS}
+      ADMIN_USER_ID: ${ADMIN_USER_ID}
+      DATABASE_FILE: ${DATABASE_FILE}
+    volumes:
+      - /home/chebyrek/data/:/data
+    restart: always
