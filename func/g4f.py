@@ -84,7 +84,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     )
             )
             prompt = improved_prompt.choices[0].message.content
-            print(f"Improved prompt: {prompt}")
         except Exception as e:
             logging.error(f"Error during prompt improvement: {e}")
             await bot.send_message(user_id, f"🚨Ошибка при улучшении промпта: {e}")
@@ -205,7 +204,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             await bot.send_message(user_id, "🚨Генерация изображений с помощью Google AI недоступна, так как не указан GEMINI_API_KEY.")
 
     else:
-        print('using g4f')
         image_gen_client = get_client(user_id, "g4f_image_gen_client", model_name=model_name)
 
         try:
