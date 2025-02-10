@@ -2,14 +2,17 @@
 FROM python:3.11-slim
 
 # Обновляем список пакетов и устанавливаем необходимые системные пакеты
-RUN apt-get update && apt-get install -y build-essential
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
 # Копируем файл зависимостей и устанавливаем их
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Копируем весь исходный код проекта в контейнер
 COPY . .
