@@ -79,21 +79,19 @@ genai.configure(api_key=GEMINI_API_KEY)
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 PROVIDER_MODELS = {
-    Blackbox: ['gpt-4', 'gemini-1.5-flash', 'llama-3.3-70b', 'mixtral-7b', 'deepseek-chat', 'dbrx-instruct', 'qwq-32b', 'hermes-2-dpo', 'flux', 'deepseek-r1', 'deepseek-v3', 'blackboxai-pro', 'llama-3.1-8b', 'llama-3.1-70b', 'llama-3.1-405b', 'blackboxai'], 
+    Blackbox: ['gpt-4o', 'gemini-1.5-flash', 'llama-3.3-70b', 'mixtral-7b', 'deepseek-chat', 'dbrx-instruct', 'qwq-32b', 'hermes-2-dpo', 'flux', 'deepseek-r1', 'deepseek-v3', 'blackboxai-pro', 'llama-3.1-8b', 'llama-3.1-70b', 'llama-3.1-405b', 'blackboxai', 'gemini-2.0-flash', 'o3-mini'], 
     Glider: ['llama-3.1-70b', 'llama-3.1-8b', 'llama-3.2-3b', 'deepseek-r1'],
-    DeepInfraChat: ['llama-3.1-8b', 'llama-3.2-90b', 'llama-3.3-70b', 'deepseek-v3', 'mixtral-small-28b', 'deepseek-r1', 'phi-4', 'wizardlm-2-8x22b', 'qwen-2.5-72b'], 
+    DeepInfraChat: ['llama-3.1-8b', 'llama-3.2-90b', 'llama-3.3-70b', 'deepseek-v3', 'mixtral-small-28b', 'deepseek-r1', 'phi-4', 'wizardlm-2-8x22b', 'qwen-2.5-72b', 'llama-3.2-90b', 'minicpm-2.5'], 
     HuggingSpace: ['qvq-72b', 'qwen-2-72b', 'command-r', 'command-r-plus', 'command-r7b', 'flux-dev', 'flux-schnell', 'sd-3.5'],
-    DDG: ['gpt-4o-mini', 'claude-3-haiku', 'llama-3.1-70b', 'mixtral-8x7b'], 
-    PollinationsAI: ['gpt-4o-mini', 'gpt-4', 'gpt-4o', 'qwen-2.5-72b', 'qwen-2.5-coder-32b', 'llama-3.3-70b', 'mistral-nemo', 'deepseek-chat', 'llama-3.1-8b', 'gpt-4o-vision', 'gpt-4o-mini-vision', 'deepseek-r1', 'sdxl-turbo', 'flux'], 
+    DDG: ['gpt-4o-mini', 'claude-3-haiku', 'llama-3.3-70b', 'mixtral-small-24b', 'o3-mini'], 
+    PollinationsAI: ['gpt-4o-mini', 'gpt-4', 'gpt-4o', 'qwen-2.5-72b', 'qwen-2.5-coder-32b', 'llama-3.3-70b', 'mistral-nemo', 'deepseek-chat', 'llama-3.1-8b', 'gpt-4o-vision', 'gpt-4o-mini-vision', 'deepseek-r1', 'gemini-2.0-flash', 'gemini-2.0-flash-thinking','sdxl-turbo', 'flux'], 
     OIVSCode: ['gpt-4o-mini'],
     ImageLabs: ['sdxl-turbo'], 
     TeachAnything: ['llama-3.1-70b'],
-    PerplexityLabs:['sonar', 'sonar-pro', 'sonar-reasoning'],
+    PerplexityLabs:['sonar', 'sonar-pro', 'sonar-reasoning', 'sonar-reasoning-pro', 'r1-1776'],
     BlackboxAPI:['deepseek-v3', 'deepseek-r1', 'deepseek-chat', 'mixtral-small-28b', 'dbrx-instruct', 'qwq-32b', 'hermes-2-dpo'],
     CablyAI:['o3-mini-low', 'gpt-4o-mini', 'deepseek-r1', 'deepseek-v3' ],
     Liaobots:['gpt-4o-mini', 'gpt-4o', 'gpt-4', 'o1-preview', 'o1-mini', 'deepseek-r1', 'deepseek-v3', 'claude-3-opus', 'claude-3.5-sonnet', 'claude-3-sonnet', 'gemini-2.0-flash', 'gemini-2.0-flash-thinking', 'gemini-1.5-flash', 'gemini-1.5-pro']
-
-
 }
 
 
@@ -116,7 +114,7 @@ def get_supported_providers(provider_classes, model_name=None):
     return supported_providers
 
 chat_providers = [DDG,Blackbox, BlackboxAPI, CablyAI, Glider, HuggingSpace, PerplexityLabs, TeachAnything, PollinationsAI, OIVSCode, DeepInfraChat, ImageLabs]
-image_providers = [Blackbox, PollinationsAI, OIVSCode]
+image_providers = [Blackbox, DeepInfraChat, PollinationsAI, OIVSCode]
 web_search_providers = [Blackbox]
 
 g4f_client_providers = get_supported_providers(chat_providers)
@@ -207,14 +205,14 @@ enhance_prompt_client = None
 async def init_enhance_prompt_client():
     
     global enhance_prompt_client
-    model_name = "llama-3.1-70b"  # Фиксированная модель для улучшения промпта
+    model_name = "llama-3.3-70b"  # Фиксированная модель для улучшения промпта
     enhanced_chat_providers = get_supported_providers(chat_providers, model_name)
     enhanced_image_providers = get_supported_providers(image_providers, model_name)
     enhance_prompt_client = Client(
         provider=RetryProvider(enhanced_chat_providers, shuffle=False),
         image_provider=RetryProvider(enhanced_image_providers, shuffle=False)
     )
-    logging.info("Enhance prompt client initialized with model 'llama-3.1-70b'")
+    logging.info("Enhance prompt client initialized with model ${model_name}")
 
 
 def update_image_gen_client(user_id, image_gen_model):

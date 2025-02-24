@@ -406,7 +406,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
                         messages=user_context["messages"],
                     )
 
-                if model_id == "deepseek-r1":  
+                if model_id in ['deepseek-r1', 'o3-mini-low', 'o3-mini', 'r1-1776', 'sonar-reasoning', 'sonar-reasoning-pro']:
                     response = await asyncio.to_thread(sync_g4f_request)
                 else:
                     response = await run_with_timeout(
@@ -453,6 +453,9 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
                 )
 
         if response_text:
+            # Удаляем теги <think> и </think> из ответа модели
+            response_text = response_text.replace("<think>", "").replace("</think>", "")
+            
             end_time = time.time()
             processing_time = end_time - start_time
             formatted_processing_time = str(timedelta(seconds=int(processing_time)))
@@ -576,10 +579,11 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                             model=model_id,
                             messages=user_context["messages"],
                         )
-                    completion = await run_with_timeout(
+                    wrapped_coroutine = await run_with_timeout(
                         asyncio.to_thread(glhf_request), timeout=60
                     )
-                    if completion:
+                    if wrapped_coroutine:
+                        completion = await wrapped_coroutine
                         response_text = completion.choices[0].message.content
 
                 elif api_type == "g4f":
@@ -612,7 +616,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                                 messages=user_context["messages"],
                             )
 
-                        if model_id == "deepseek-r1": 
+                        if model_id in ['deepseek-r1', 'o3-mini-low', 'o3-mini', 'r1-1776', 'sonar-reasoning', 'sonar-reasoning-pro']: 
                             response = await asyncio.to_thread(g4f_request)
                         else:
                             response = await run_with_timeout(
@@ -641,6 +645,9 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                         response_text = response.text
 
                 if response_text:
+                    # Удаляем теги <think> и </think> из ответа модели
+                    response_text = response_text.replace("<think>", "").replace("</think>", "")
+                    
                     end_time = time.time()
                     processing_time = end_time - start_time
                     formatted_processing_time = str(timedelta(seconds=int(processing_time)))

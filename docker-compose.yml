@@ -2,7 +2,9 @@ services:
   bot:
     dns:
       - 83.220.169.155
+      - 212.109.195.93
     build: .
+    image: botik
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
       GLHF_API_KEY: ${GLHF_API_KEY}

@@ -47,15 +47,15 @@ DEFAULT_MODELS = [
 
 DEFAULT_IMAGE_GEN_MODELS = ["flux", "turbo", "flux-schnell", "flux-dev", "sd-3.5", "sdxl-turbo" ]
 
-DEFAULT_IMAGE_RECOGNITION_MODELS = ["blackboxai", "gpt-4o", "gemini-1.5-flash", "llama-3.1-405b" , "llama-3.1-70b", "gpt-4o-mini"]
+DEFAULT_IMAGE_RECOGNITION_MODELS = ["gpt-4o", "gemini-1.5-flash", "llama-3.1-405b" , "llama-3.1-70b","gemini-2.0-flash", "gpt-4o-mini" ,'llama-3.2-90b', 'minicpm-2.5']
 
 DEFAULT_WHISPER_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]
 
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gpt-4o"
 DEFAULT_IMAGE_GEN_MODEL = "flux"
-DEFAULT_IMAGE_RECOGNITION_MODEL = "gpt-4o-mini"
+DEFAULT_IMAGE_RECOGNITION_MODEL = "gpt-4o"
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
 DEFAULT_ASPECT_RATIO = "1:1"
 DEFAULT_ENHANCE = True

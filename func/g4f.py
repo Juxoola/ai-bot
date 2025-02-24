@@ -255,6 +255,7 @@ async def handle_image_recognition(message: types.Message, state: FSMContext):
     file_path = file.file_path
     image_data = await bot.download_file(file_path)
     image = BytesIO(image_data.read())
+    image.seek(0)
 
     user_context = await load_context(user_id)
     user_context["g4f_image"] = image
