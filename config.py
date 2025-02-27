@@ -2,18 +2,19 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import State, StatesGroup
 import concurrent
 from aiogram import Bot, Dispatcher
+import g4f.providers
 import openai
 import google.generativeai as genai
 from g4f.client import AsyncClient, Client
-from g4f.Provider import RetryProvider, Blackbox, DeepInfraChat,PollinationsAI, TeachAnything,PerplexityLabs,HuggingSpace, ImageLabs, DDG, OIVSCode, Glider, BlackboxAPI, CablyAI, Liaobots
+from g4f.Provider import RetryProvider
 from groq import Groq
 from key import GROQ_API_KEY, GEMINI_API_KEY, GLHF_API_KEY, BOT_TOKEN
 import g4f
 import os
 import logging
+import json
+import importlib
 
-
-# Путь к базе данных
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
 bot = Bot(token=BOT_TOKEN)
@@ -78,22 +79,63 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-PROVIDER_MODELS = {
-    Blackbox: ['gpt-4o', 'gemini-1.5-flash', 'llama-3.3-70b', 'mixtral-7b', 'deepseek-chat', 'dbrx-instruct', 'qwq-32b', 'hermes-2-dpo', 'flux', 'deepseek-r1', 'deepseek-v3', 'blackboxai-pro', 'llama-3.1-8b', 'llama-3.1-70b', 'llama-3.1-405b', 'blackboxai', 'gemini-2.0-flash', 'o3-mini'], 
-    Glider: ['llama-3.1-70b', 'llama-3.1-8b', 'llama-3.2-3b', 'deepseek-r1'],
-    DeepInfraChat: ['llama-3.1-8b', 'llama-3.2-90b', 'llama-3.3-70b', 'deepseek-v3', 'mixtral-small-28b', 'deepseek-r1', 'phi-4', 'wizardlm-2-8x22b', 'qwen-2.5-72b', 'llama-3.2-90b', 'minicpm-2.5'], 
-    HuggingSpace: ['qvq-72b', 'qwen-2-72b', 'command-r', 'command-r-plus', 'command-r7b', 'flux-dev', 'flux-schnell', 'sd-3.5'],
-    DDG: ['gpt-4o-mini', 'claude-3-haiku', 'llama-3.3-70b', 'mixtral-small-24b', 'o3-mini'], 
-    PollinationsAI: ['gpt-4o-mini', 'gpt-4', 'gpt-4o', 'qwen-2.5-72b', 'qwen-2.5-coder-32b', 'llama-3.3-70b', 'mistral-nemo', 'deepseek-chat', 'llama-3.1-8b', 'gpt-4o-vision', 'gpt-4o-mini-vision', 'deepseek-r1', 'gemini-2.0-flash', 'gemini-2.0-flash-thinking','sdxl-turbo', 'flux'], 
-    OIVSCode: ['gpt-4o-mini'],
-    ImageLabs: ['sdxl-turbo'], 
-    TeachAnything: ['llama-3.1-70b'],
-    PerplexityLabs:['sonar', 'sonar-pro', 'sonar-reasoning', 'sonar-reasoning-pro', 'r1-1776'],
-    BlackboxAPI:['deepseek-v3', 'deepseek-r1', 'deepseek-chat', 'mixtral-small-28b', 'dbrx-instruct', 'qwq-32b', 'hermes-2-dpo'],
-    CablyAI:['o3-mini-low', 'gpt-4o-mini', 'deepseek-r1', 'deepseek-v3' ],
-    Liaobots:['gpt-4o-mini', 'gpt-4o', 'gpt-4', 'o1-preview', 'o1-mini', 'deepseek-r1', 'deepseek-v3', 'claude-3-opus', 'claude-3.5-sonnet', 'claude-3-sonnet', 'gemini-2.0-flash', 'gemini-2.0-flash-thinking', 'gemini-1.5-flash', 'gemini-1.5-pro']
-}
+# Функция для динамического импорта провайдера по его имени
+def get_provider(provider_name: str):
+    module = importlib.import_module("g4f.Provider")
+    return getattr(module, provider_name)
 
+# Читаем списки провайдеров из переменных окружения (имена через запятую)
+raw_chat_providers = os.environ.get(
+    "CHAT_PROVIDERS",
+    "DDG,Blackbox,CablyAI,Glider,HuggingSpace,PerplexityLabs,TeachAnything,PollinationsAI,OIVSCode,DeepInfraChat,ImageLabs"
+)
+chat_providers = [get_provider(p.strip()) for p in raw_chat_providers.split(",") if p.strip()]
+
+raw_image_providers = os.environ.get(
+    "IMAGE_PROVIDERS",
+    "Blackbox,DeepInfraChat,PollinationsAI,OIVSCode"
+)
+image_providers = [get_provider(p.strip()) for p in raw_image_providers.split(",") if p.strip()]
+
+raw_web_search_providers = os.environ.get(
+    "WEB_SEARCH_PROVIDERS",
+    "Blackbox"
+)
+web_search_providers = [get_provider(p.strip()) for p in raw_web_search_providers.split(",") if p.strip()]
+
+# Конфигурация моделей для каждого провайдера (ожидается JSON-строка)
+raw_provider_models = os.environ.get("PROVIDER_MODELS")
+if raw_provider_models:
+    try:
+        provider_models_config = json.loads(raw_provider_models)
+        PROVIDER_MODELS = {}
+        for key, value in provider_models_config.items():
+            if isinstance(value, str):
+                models = [m.strip() for m in value.split(",") if m.strip()]
+            elif isinstance(value, list):
+                models = value
+            else:
+                models = []
+            provider_class = get_provider(key)
+            PROVIDER_MODELS[provider_class] = models
+    except Exception as e:
+        logging.error("Error parsing PROVIDER_MODELS env variable: %s", e)
+        PROVIDER_MODELS = {}
+else:
+    PROVIDER_MODELS = {
+        get_provider("Blackbox"): ['gpt-4o', 'gemini-1.5-flash', 'llama-3.3-70b', 'mixtral-7b', 'deepseek-chat', 'dbrx-instruct', 'qwq-32b', 'hermes-2-dpo', 'flux', 'deepseek-r1', 'deepseek-v3', 'blackboxai-pro', 'llama-3.1-8b', 'llama-3.1-70b', 'llama-3.1-405b', 'blackboxai', 'gemini-2.0-flash', 'o3-mini'],
+        get_provider("Glider"): ['llama-3.1-70b', 'llama-3.1-8b', 'llama-3.2-3b', 'deepseek-r1'],
+        get_provider("DeepInfraChat"): ['llama-3.1-8b', 'llama-3.2-90b', 'llama-3.3-70b', 'deepseek-v3', 'mixtral-small-28b', 'deepseek-r1', 'phi-4', 'wizardlm-2-8x22b', 'qwen-2.5-72b', 'llama-3.2-90b', 'minicpm-2.5'],
+        get_provider("HuggingSpace"): ['qvq-72b', 'qwen-2-72b', 'command-r', 'command-r-plus', 'command-r7b', 'flux-dev', 'flux-schnell', 'sd-3.5'],
+        get_provider("DDG"): ['gpt-4o-mini', 'claude-3-haiku', 'llama-3.3-70b', 'mixtral-small-24b', 'o3-mini'],
+        get_provider("PollinationsAI"): ['gpt-4o-mini', 'gpt-4', 'gpt-4o', 'qwen-2.5-72b', 'qwen-2.5-coder-32b', 'llama-3.3-70b', 'mistral-nemo', 'deepseek-chat', 'llama-3.1-8b', 'gpt-4o-vision', 'gpt-4o-mini-vision', 'deepseek-r1', 'gemini-2.0-flash', 'gemini-2.0-flash-thinking', 'sdxl-turbo', 'flux'],
+        get_provider("OIVSCode"): ['gpt-4o-mini'],
+        get_provider("ImageLabs"): ['sdxl-turbo'],
+        get_provider("TeachAnything"): ['llama-3.1-70b'],
+        get_provider("PerplexityLabs"): ['sonar', 'sonar-pro', 'sonar-reasoning', 'sonar-reasoning-pro', 'r1-1776'],
+        get_provider("CablyAI"): ['o3-mini-low', 'gpt-4o-mini', 'deepseek-r1', 'deepseek-v3'],
+        get_provider("Liaobots"): ['gpt-4o-mini', 'gpt-4o', 'gpt-4', 'o1-preview', 'o1-mini', 'deepseek-r1', 'deepseek-v3', 'claude-3-opus', 'claude-3.5-sonnet', 'claude-3-sonnet', 'gemini-2.0-flash', 'gemini-2.0-flash-thinking', 'gemini-1.5-flash', 'gemini-1.5-pro']
+    }
 
 def get_supported_providers(provider_classes, model_name=None):
 
@@ -112,10 +154,6 @@ def get_supported_providers(provider_classes, model_name=None):
                 print(f"Provider {provider_class.__name__} is not in PROVIDER_MODELS, assuming it supports all models (or as defined by empty list [] in PROVIDER_MODELS).")
 
     return supported_providers
-
-chat_providers = [DDG,Blackbox, BlackboxAPI, CablyAI, Glider, HuggingSpace, PerplexityLabs, TeachAnything, PollinationsAI, OIVSCode, DeepInfraChat, ImageLabs]
-image_providers = [Blackbox, DeepInfraChat, PollinationsAI, OIVSCode]
-web_search_providers = [Blackbox]
 
 g4f_client_providers = get_supported_providers(chat_providers)
 g4f_image_client_providers = get_supported_providers(image_providers) 
@@ -212,7 +250,7 @@ async def init_enhance_prompt_client():
         provider=RetryProvider(enhanced_chat_providers, shuffle=False),
         image_provider=RetryProvider(enhanced_image_providers, shuffle=False)
     )
-    logging.info("Enhance prompt client initialized with model ${model_name}")
+    logging.info("Enhance prompt client initialized with model {model_name}")
 
 
 def update_image_gen_client(user_id, image_gen_model):

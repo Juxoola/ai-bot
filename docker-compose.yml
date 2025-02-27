@@ -13,6 +13,10 @@ services:
       ALLOWED_USER_IDS: ${ALLOWED_USER_IDS}
       ADMIN_USER_ID: ${ADMIN_USER_ID}
       DATABASE_FILE: ${DATABASE_FILE}
+      CHAT_PROVIDERS: ${CHAT_PROVIDERS}
+      IMAGE_PROVIDERS: ${IMAGE_PROVIDERS}
+      WEB_SEARCH_PROVIDERS: ${WEB_SEARCH_PROVIDERS}
+      PROVIDER_MODELS: ${PROVIDER_MODELS}
     volumes:
       - /home/chebyrek/data/:/data
     restart: always

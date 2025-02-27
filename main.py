@@ -521,12 +521,11 @@ async def main():
         
         print("Бот запущен и клиенты для всех пользователей инициализированы.")
 
-        while True:
-          try:
-              await dp.start_polling(bot, timeout=60, skip_updates=True)
-          except Exception as e:
-              print(f"Ошибка polling-а: {e}")
-              await asyncio.sleep(3)  # Небольшая пауза перед повторной попыткой
+        try:
+            await dp.start_polling(bot, timeout=30, skip_updates=True)
+        except Exception as e:
+            logging.error(f"Ошибка polling-а: {e}", exc_info=True)
+
     except Exception as e:
         print(f"Error during bot execution: {e}")
     finally:

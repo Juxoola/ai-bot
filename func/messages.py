@@ -286,12 +286,33 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
    
 
     try:
-        async def run_with_timeout(coro, timeout):
+        async def run_with_timeout(coro, timeout, message=None):
+            """Выполняет корутину с таймаутом и правильно освобождает ресурсы."""
+            task = asyncio.create_task(coro)
             try:
-                return await asyncio.wait_for(coro, timeout=timeout)
+                result = await asyncio.wait_for(task, timeout=timeout)
+                return result
             except asyncio.TimeoutError:
-                logging.error(f"Превышено время ожидания ответа от модели.")
-                await message.reply(f"🚨 Превышено время ожидания ответа от модели. Попробуйте позже или смените модель.")
+                logging.error(f"Превышено время ожидания ответа (таймаут {timeout} сек).")
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass  # Ожидаемое поведение при отмене
+                    except Exception as e:
+                        logging.error(f"Ошибка при отмене задачи: {e}")
+                
+                if message:
+                    await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
+                return None
+            except Exception as e:
+                logging.error(f"Ошибка в run_with_timeout: {e}")
+                if not task.done():
+                    task.cancel()
+                
+                if message:
+                    await message.reply(f"🚨 Произошла ошибка при обработке запроса: {str(e)}")
                 return None
 
         if api_type == "glhf":
@@ -306,7 +327,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
                 logging.info(f"[{current_time}] Начало запроса к GLHF API")
 
                 wrapped_coroutine = await run_with_timeout(
-                    asyncio.to_thread(glhf_request), timeout=60
+                    asyncio.to_thread(glhf_request), timeout=60, message=message
                 )
 
                 if wrapped_coroutine:
@@ -343,7 +364,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
 
                 
                 response = await run_with_timeout(
-                    asyncio.to_thread(g4f_image_request), timeout=60
+                    asyncio.to_thread(g4f_image_request), timeout=60, message=message
                 )
                 if response:
                     response_text = response.choices[0].message.content
@@ -383,7 +404,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
 
                 
                 response = await run_with_timeout(
-                    asyncio.to_thread(g4f_web_search_request), timeout=60
+                    asyncio.to_thread(g4f_web_search_request), timeout=60, message=message
                 )
 
                 if response:
@@ -410,8 +431,8 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
                     response = await asyncio.to_thread(sync_g4f_request)
                 else:
                     response = await run_with_timeout(
-                        asyncio.to_thread(sync_g4f_request), timeout=60
-                    )
+                            asyncio.to_thread(sync_g4f_request), timeout=60, message=message
+                        )
 
                 if response:
                     response_text = response.choices[0].message.content
@@ -441,7 +462,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
             current_time = time.strftime("%H:%M:%S", time.localtime())
             logging.info(f"[{current_time}] Начало запроса к Gemini API")
             response = await run_with_timeout(
-                    asyncio.to_thread(gemini_request), timeout=60
+                    asyncio.to_thread(gemini_request), timeout=60, message=message
                 )
             
             if response:
@@ -563,14 +584,33 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
             response_text = ""
 
             try:
-                async def run_with_timeout(coro, timeout):
+                async def run_with_timeout(coro, timeout, message=None):
+                    """Выполняет корутину с таймаутом и правильно освобождает ресурсы."""
+                    task = asyncio.create_task(coro)
                     try:
-                        return await asyncio.wait_for(coro, timeout=timeout)
+                        result = await asyncio.wait_for(task, timeout=timeout)
+                        return result
                     except asyncio.TimeoutError:
-                        logging.error(f"Превышено время ожидания ответа от модели.")
-                        await message.reply(
-                            f"🚨 Превышено время ожидания ответа от модели. Попробуйте позже или смените модель."
-                        )
+                        logging.error(f"Превышено время ожидания ответа (таймаут {timeout} сек).")
+                        if not task.done():
+                            task.cancel()
+                            try:
+                                await task
+                            except asyncio.CancelledError:
+                                pass  # Ожидаемое поведение при отмене
+                            except Exception as e:
+                                logging.error(f"Ошибка при отмене задачи: {e}")
+                        
+                        if message:
+                            await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
+                        return None
+                    except Exception as e:
+                        logging.error(f"Ошибка в run_with_timeout: {e}")
+                        if not task.done():
+                            task.cancel()
+                        
+                        if message:
+                            await message.reply(f"🚨 Произошла ошибка при обработке запроса: {str(e)}")
                         return None
 
                 if api_type== "glhf":
@@ -580,7 +620,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                             messages=user_context["messages"],
                         )
                     wrapped_coroutine = await run_with_timeout(
-                        asyncio.to_thread(glhf_request), timeout=60
+                        asyncio.to_thread(glhf_request), timeout=60, message=message
                     )
                     if wrapped_coroutine:
                         completion = await wrapped_coroutine
@@ -603,7 +643,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                                 image=user_context["g4f_image"],
                             )
                         response = await run_with_timeout(
-                            asyncio.to_thread(g4f_image_request), timeout=60
+                            asyncio.to_thread(g4f_image_request), timeout=60, message=message
                         )
                         if response:
                             response_text = response.choices[0].message.content
@@ -620,7 +660,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                             response = await asyncio.to_thread(g4f_request)
                         else:
                             response = await run_with_timeout(
-                                asyncio.to_thread(g4f_request), timeout=60
+                                asyncio.to_thread(g4f_request), timeout=60, message=message
                             )
 
                         if response:
@@ -638,7 +678,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                         )
 
                     response = await run_with_timeout(
-                                asyncio.to_thread(gemini_request), timeout=60
+                                asyncio.to_thread(gemini_request), timeout=60, message=message
                             )
                     
                     if response:
