@@ -43,6 +43,22 @@ DEFAULT_MODELS = [
     {"model_id": "searchgpt", "model_name": "SearchGPT","api": "glhf"},
     {"model_id": "deepseek", "model_name": "DeepSeek-V3","api": "glhf"},
     {"model_id": "deepseek-r1", "model_name": "Deepseek-r1","api": "glhf"},
+    {"model_id": "deepseek-r1", "model_name": "Deepseek-r1","api": "ddc"},
+    {"model_id": "google/gemini-2.0-pro-exp-02-05:free", "model_name": "Gemini-2.0-pro-exp-02-05","api": "openrouter"},
+    {"model_id": "google/gemini-2.0-flash-thinking-exp:free", "model_name": "Gemini-2.0-flash-thinking-exp","api": "openrouter"},
+    {"model_id": "deepseek/deepseek-r1-distill-llama-70b:free", "model_name": "DeepSeek-R1-Distill-70B", "api": "openrouter"},
+    {"model_id": "deepseek/deepseek-r1:free", "model_name": "DeepSeek-R1", "api": "openrouter"},
+    {"model_id": "deepseek/deepseek-chat:free", "model_name": "DeepSeekV3", "api": "openrouter"},
+    {"model_id": "qwen/qwen-2.5-coder-32b-instruct:free", "model_name": "Qwen-2.5-Coder-32B", "api": "openrouter"},
+    {"model_id": "qwen/qwen2.5-vl-72b-instruct:free", "model_name": "Qwen-2.5-VL-72B", "api": "openrouter"},
+    {"model_id": "qwen/qwen-vl-plus:free", "model_name": "Qwen-VL-Plus", "api": "openrouter"},
+    {"model_id": "google/gemini-2.0-flash-exp:free", "model_name": "Gemini-2.0-flash-exp","api": "openrouter"},
+    {"model_id": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", "model_name": "DeepSeek-R1-Distill-32B","api":"ddc"},
+    {"model_id": "deepseek-v3", "model_name": "DeepSeek-V3", "api": "ddc"},
+    {"model_id": "gpt-4o", "model_name": "GPT-4o", "api": "ddc"}
+
+
+
 ]
 
 DEFAULT_IMAGE_GEN_MODELS = ["flux", "turbo", "flux-schnell", "flux-dev", "sd-3.5", "sdxl-turbo" ]
@@ -357,7 +373,7 @@ async def load_context(user_id):
 
                 context = {
                     "model": f"{model_id}_{api_type}", 
-                    "messages": [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}] if api_type in ["glhf", "g4f"] else [],
+                    "messages": [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}] if api_type in ["glhf", "g4f", "ddc", "openrouter"] else [],
                     "api_type": api_type,
                     "g4f_image": None,
                     "long_message": "",

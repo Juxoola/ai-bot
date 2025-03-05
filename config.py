@@ -8,7 +8,7 @@ import google.generativeai as genai
 from g4f.client import AsyncClient, Client
 from g4f.Provider import RetryProvider
 from groq import Groq
-from key import GROQ_API_KEY, GEMINI_API_KEY, GLHF_API_KEY, BOT_TOKEN
+from key import GROQ_API_KEY, GEMINI_API_KEY, GLHF_API_KEY, BOT_TOKEN, DDC_API_KEY, OPEN_ROUTER_KEY
 import g4f
 import os
 import logging
@@ -74,6 +74,18 @@ openai_client = openai.AsyncOpenAI(
     api_key=GLHF_API_KEY,
     base_url="https://text.pollinations.ai/openai"
 )
+
+# Initialize OpenAI client
+openai_client2 = openai.AsyncOpenAI(
+    api_key=DDC_API_KEY ,
+    base_url="https://api.sree.shop/v1"
+)
+
+openrouter_client = openai.AsyncOpenAI(
+    api_key=OPEN_ROUTER_KEY ,
+    base_url="https://openrouter.ai/api/v1"
+)
+
 
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -243,7 +255,7 @@ enhance_prompt_client = None
 async def init_enhance_prompt_client():
     
     global enhance_prompt_client
-    model_name = "llama-3.3-70b"  # Фиксированная модель для улучшения промпта
+    model_name = "llama-3.3-70b"  
     enhanced_chat_providers = get_supported_providers(chat_providers, model_name)
     enhanced_image_providers = get_supported_providers(image_providers, model_name)
     enhance_prompt_client = Client(
@@ -271,3 +283,14 @@ def update_image_gen_client(user_id, image_gen_model):
     import logging
     logging.info(f"User {user_id}: Image generation client updated with model '{image_gen_model}'")
     return new_client
+
+def get_openai_client(api_type: str):
+
+    if api_type == "glhf":
+        return openai_client
+    elif api_type == "ddc":
+        return openai_client2
+    elif api_type == "openrouter":
+        return openrouter_client
+    else:
+        raise ValueError(f"Unsupported api_type: {api_type}")

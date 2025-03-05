@@ -305,7 +305,7 @@ async def handle_files_or_urls(message: types.Message, state: FSMContext):
                     user_context["messages"][-1]["parts"].append({"text": file_content})
                 else:
                     user_context["messages"].append({"role": "user", "parts": [{"text": file_content}]})
-            elif api_type in ["glhf", "g4f"]:
+            elif api_type in ["glhf", "g4f", "openrouter", "ddc"]:
                 user_context["messages"].append({"role": "user", "content": file_content})
 
             await save_context(user_id, user_context)

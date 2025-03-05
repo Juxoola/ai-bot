@@ -1,5 +1,5 @@
 from aiogram.fsm.context import FSMContext
-from config import  get_client, Form, openai_client,  g4f_image_client
+from config import  get_client, Form, openai_client,  g4f_image_client, openai_client2
 from func.messages import fix_markdown, send_message_in_parts
 from database import load_context, save_context, av_models
 from aiogram import types
@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 import spacy
 from concurrent.futures import ThreadPoolExecutor
 import google.generativeai as genai
-
+from .messages import call_openai_completion
 
 DEFAULT_INSTRUCTIONS = """
 Using the provided web search results, to write a comprehensive reply to the user request.
@@ -248,7 +248,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
     query = message.text
     user_id = message.from_user.id
     user_context = await load_context(user_id)
-    model_key = user_context["model"]  
+    model_key = user_context["model"]
     model_id, api_type = model_key.split('_')
     MAX_MESSAGE_LENGTH = 4096
 
@@ -267,28 +267,22 @@ async def process_search_query(message: types.Message, state: FSMContext):
 {query}
 """     
         
-        if api_type in ["glhf", "g4f"]:
-            user_context["messages"].append(
-                {"role": "user", "content": search_message}
-            )
+        if api_type in ["glhf", "g4f", "ddc", "openrouter"]:
+            user_context["messages"].append({"role": "user", "content": search_message})
         elif api_type == "gemini":
-            user_context["messages"].append(
-                {"role": "user", "parts": [{"text": search_message}]}
-            )
+            user_context["messages"].append({"role": "user", "parts": [{"text": search_message}]})
 
         response_text = None
-        if api_type == "glhf":
-            async def glhf_request():
-                return await openai_client.chat.completions.create(
-                    model=model_id,
-                    messages=user_context["messages"],
-                )
 
-            completion = await asyncio.to_thread(
-                lambda: asyncio.run(run_with_timeout(glhf_request(), timeout=60))
+        if api_type in ["glhf", "ddc", "openrouter"]:
+            # Аналогично messages: сначала запускаем call_openai_completion через run_with_timeout,
+            # затем выполняем второй await для получения результата.
+            wrapped_coro = await run_with_timeout(
+                call_openai_completion(api_type, model_id, user_context["messages"]),
+                timeout=60
             )
-
-            if completion:
+            if wrapped_coro is not None:
+                completion = await wrapped_coro
                 response_text = completion.choices[0].message.content
 
         elif api_type == "g4f":
@@ -299,22 +293,16 @@ async def process_search_query(message: types.Message, state: FSMContext):
                     messages=user_context["messages"],
                 )
 
-            response = await run_with_timeout(
-                asyncio.to_thread(g4f_request), timeout=60
-            )
+            response = await run_with_timeout(asyncio.to_thread(g4f_request), timeout=60)
             if response:
                 response_text = response.choices[0].message.content
 
         elif api_type == "gemini":
             async def gemini_request():
                 gemini_model = genai.GenerativeModel(model_id)
-                return gemini_model.generate_content(
-                    user_context["messages"]
-                )
-            response = await run_with_timeout(
-                                asyncio.to_thread(gemini_request), timeout=60
-            )
+                return gemini_model.generate_content(user_context["messages"])
 
+            response = await run_with_timeout(asyncio.to_thread(gemini_request), timeout=60)
             if response:
                 response_text = response.text
 
@@ -327,26 +315,19 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 except Exception as e:
                     logging.error(f"Ошибка Markdown при отправке сообщения: {e}")
                     try:
-                        await message.answer(
-                            f"🔔Попытка фиксить форматирование сообщения"
-                        )
+                        await message.answer("🔔Попытка фиксить форматирование сообщения")
                         fixed_response = await fix_markdown(response_text)
                         await message.answer(fixed_response, parse_mode=ParseMode.MARKDOWN)
                     except Exception as e:
                         await message.answer(
-                            f"🚨Произошла ошибка при форматировании сообщения: {e}\n\n"
-                            "Отправляю без форматирования."
+                            f"🚨Произошла ошибка при форматировании сообщения: {e}\n\nОтправляю без форматирования."
                         )
                         await message.answer(response_text)
 
-        if api_type in ["glhf", "g4f"]:
-            user_context["messages"].append(
-                {"role": "assistant", "content": response_text}
-            )
+        if api_type in ["glhf", "g4f", "ddc", "openrouter"]:
+            user_context["messages"].append({"role": "assistant", "content": response_text})
         elif api_type == "gemini":
-            user_context["messages"].append(
-                {"role": "model", "parts": [{"text": response_text}]}
-            )
+            user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
         await save_context(user_id, user_context)
     except Exception as e:
         logging.error(f"Ошибка во время веб-поиска или отправки в модель: {e}")

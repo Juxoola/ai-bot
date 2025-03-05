@@ -75,13 +75,13 @@ async def process_new_model_name(message: types.Message, state: FSMContext):
 async def process_new_model_id(message: types.Message, state: FSMContext):
     model_id = message.text
     await state.update_data(new_model_id=model_id)
-    await message.reply("Введите тип API новой модели для чата (glhf, gemini или g4f):")
+    await message.reply("Введите тип API новой модели для чата (glhf, gemini, g4f, ddc, openrouter):")
     await state.set_state(Form.waiting_for_new_model_api)
 
 async def process_new_model_api(message: types.Message, state: FSMContext):
     model_api = message.text.lower()  # Приводим к нижнему регистру для унификации
-    if model_api not in ["glhf", "gemini", "g4f"]:
-        await message.reply("Неверный тип API. Пожалуйста, используйте команду /add_model снова и введите 'glhf', 'gemini' или 'g4f'.")
+    if model_api not in ["glhf", "gemini", "g4f", "ddc", "openrouter"]:
+        await message.reply("Неверный тип API. Пожалуйста, используйте команду /add_model снова и введите 'glhf', 'gemini', 'g4f' или 'openrouter'.")
         await state.set_state(Form.waiting_for_message)
         return
 

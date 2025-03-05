@@ -166,7 +166,7 @@ async def get_g4f_keyboard_with_admin_button():
 async def get_model_selection_keyboard(available_models):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
 
-    priority_api_order = ["gemini", "g4f", "glhf"]
+    priority_api_order = ["gemini", "g4f", "openrouter", "glhf"]
     
     grouped_models = {}
     for model_id, model_data in available_models.items():

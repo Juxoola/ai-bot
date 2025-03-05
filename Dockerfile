@@ -32,6 +32,8 @@ COPY . .
 # Передаём дефолтные значения переменных окружения
 ENV BOT_TOKEN="default_bot_token"
 ENV GLHF_API_KEY="default_glhf_api_key"
+ENV DDC_API_KEY="default_ddc_api_key"
+ENV OPEN_ROUTER_KEY="default_open_router_key"
 ENV GEMINI_API_KEY="default_gemini_api_key"
 ENV GROQ_API_KEY="default_groq_api_key"
 ENV ALLOWED_USER_IDS="123,456"

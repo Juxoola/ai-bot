@@ -435,34 +435,38 @@ async def handle_long_message_handler(message: types.Message, state: FSMContext)
 
 @dp.message()
 async def handle_all_messages_handler(message: types.Message, state: FSMContext):
+    # Проверка прав доступа пользователя
     if not is_allowed(message.from_user.id):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
-    
+
     user_id = message.from_user.id
-    user_context = await load_context(user_id) 
-    current_state = await state.get_state()
-    model_key = user_context["model"]  
-    model_id, api_type = model_key.split('_')
-
-
-    IMAGE_RECOGNITION_MODELS = await rec_models()
-
-    if current_state is None:
+    user_context = await load_context(user_id)
+    current_state = await state.get_state() or Form.waiting_for_message
+    if await state.get_state() is None:
         await state.set_state(Form.waiting_for_message)
 
+    # Определение модели и типа API
+    model_key = user_context["model"]
+    model_id, api_type = model_key.split('_')
+    image_rec_models = await rec_models()
+
+    # Обработка документов
     if message.document:
-        if api_type in ["g4f", "glhf"]:
+        if api_type in ["g4f", "glhf", "ddc", "openrouter"]:
             await handle_files_or_urls(message, state)
-        elif api_type == "gemini" and message.document.mime_type == "application/pdf":
-            await handle_pdf(message, state)
         elif api_type == "gemini":
-            await message.reply("🔔Модель Gemini поддерживает только PDF. Пожалуйста, смените модель или отправьте PDF файл.")
+            if message.document.mime_type == "application/pdf":
+                await handle_pdf(message, state)
+            else:
+                await message.reply("🔔Модель Gemini поддерживает только PDF. Пожалуйста, смените модель или отправьте PDF файл.")
         else:
             await message.reply("🔔Обработка файлов не поддерживается данной моделью.")
+        return
 
-    elif message.photo:
-        if api_type == "g4f" and model_id in IMAGE_RECOGNITION_MODELS:
+    # Обработка фотографий
+    if message.photo:
+        if api_type == "g4f" and model_id in image_rec_models:
             await state.set_state(Form.waiting_for_custom_image_recognition_prompt)
             await handle_image_recognition(message, state)
         elif api_type == "gemini":
@@ -471,7 +475,13 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
             else:
                 await state.set_state(Form.waiting_for_image_and_prompt)
                 await handle_image(message, state)
-        elif api_type == "glhf" and model_id in ["openai", "openai-large"]: 
+        elif api_type == "glhf" and model_id in ["openai", "openai-large"]:
+            if current_state == Form.waiting_for_image_and_prompt_openai:
+                await message.reply("🔔Пожалуйста, сначала введите текстовый промпт.")
+            else:
+                await state.set_state(Form.waiting_for_image_and_prompt_openai)
+                await handle_image_openai(message, state)
+        elif api_type == "openrouter" and model_id in ["qwen/qwen2.5-vl-72b-instruct:free", "qwen/qwen-vl-plus:free", "google/gemini-2.0-flash-exp:free", "google/gemini-2.0-flash-thinking-exp:free" "google/gemini-2.0-pro-exp-02-05:free"]:
             if current_state == Form.waiting_for_image_and_prompt_openai:
                 await message.reply("🔔Пожалуйста, сначала введите текстовый промпт.")
             else:
@@ -479,27 +489,24 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
                 await handle_image_openai(message, state)
         else:
             await message.reply("🔔Распознавание изображений не поддерживается этой моделью.")
+        return
 
-
-    elif current_state == Form.waiting_for_message:
+    # Обработка текстовых сообщений
+    if current_state == Form.waiting_for_message:
         await handle_all_messages(message, state, is_admin, is_allowed)
-
     elif current_state == Form.waiting_for_image_and_prompt:
-        if message.text:
-            if api_type == "gemini":
-              await process_custom_image_prompt(message, state)
-            else:
-              await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
-
+        if message.text and api_type == "gemini":
+            await process_custom_image_prompt(message, state)
+        else:
+            await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
     elif current_state == Form.waiting_for_image_and_prompt_openai:
-      if message.text:
-          if api_type == "glhf" and model_id in ["openai", "openai-large"]: 
+        if message.text and (
+            (api_type == "glhf" and model_id in ["openai", "openai-large"]) or
+            (api_type == "openrouter" and model_id in ["qwen/qwen2.5-vl-72b-instruct:free", "qwen/qwen-vl-plus:free", "google/gemini-2.0-flash-exp:free", "google/gemini-2.0-flash-thinking-exp:free" "google/gemini-2.0-pro-exp-02-05:free"])
+        ):
             await process_custom_image_prompt_openai(message, state)
-          else:
-              await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
-      else:
-          await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
-
+        else:
+            await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
     else:
         await handle_all_messages(message, state, is_admin, is_allowed)
 

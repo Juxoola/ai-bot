@@ -1,10 +1,8 @@
 from aiogram.fsm.context import FSMContext
-from config import Form, openai_client
-from config import get_client
+from config import Form, get_client, get_openai_client
 import tempfile
 import os
 from datetime import timedelta
-
 import config
 from database import load_context,save_context, av_models
 from aiogram import types
@@ -270,20 +268,14 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
             user_context["messages"].append(
                 {"role": "user", "parts": [{"text": message.text}]}
             )
-    elif api_type == "glhf":
+    elif api_type in ["glhf", "ddc", "g4f", "openrouter"]:
         user_context["messages"].append(
             {"role": "user", "content": message.text}
         )
-    elif api_type == "g4f":
-        user_context["messages"].append(
-            {"role": "user", "content": message.text}
-        )
-    logging.info(f"[{current_time}] Подготовка контекста заняла: {time.time() - start_time:.5f} секунд")
 
 
     response_text = ""
 
-   
 
     try:
         async def run_with_timeout(coro, timeout, message=None):
@@ -299,7 +291,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
                     try:
                         await task
                     except asyncio.CancelledError:
-                        pass  # Ожидаемое поведение при отмене
+                        pass 
                     except Exception as e:
                         logging.error(f"Ошибка при отмене задачи: {e}")
                 
@@ -315,40 +307,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
                     await message.reply(f"🚨 Произошла ошибка при обработке запроса: {str(e)}")
                 return None
 
-        if api_type == "glhf":
-            async def glhf_request():
-                return await openai_client.chat.completions.create(
-                    model=model_id,
-                    messages=user_context["messages"],
-                )
-
-            try:
-                current_time = time.strftime("%H:%M:%S", time.localtime())
-                logging.info(f"[{current_time}] Начало запроса к GLHF API")
-
-                wrapped_coroutine = await run_with_timeout(
-                    asyncio.to_thread(glhf_request), timeout=60, message=message
-                )
-
-                if wrapped_coroutine:
-                    completion = await wrapped_coroutine
-                    response_text = completion.choices[0].message.content
-                    logging.info(f"Запрос к GLHF API завершен за {time.time() - start_time:.5f} секунд")
-                    user_context["messages"].append(
-                        {"role": "assistant", "content": response_text}
-                    )
-
-            except aiohttp.ClientResponseError as e:
-                if e.status == 504:
-                    logging.error(f"Запрос к GLHF API истек по таймауту: {e}")
-                    await message.reply(
-                        "🚨 Время ожидания запроса к API GLHF истекло. Пожалуйста, попробуйте еще раз позже или выберите другую модель."
-                    )
-                    return 
-                else:
-                    raise  
-
-        elif api_type == "g4f":
+        if api_type == "g4f":
             
             if user_context["g4f_image"]:
                 def g4f_image_request():
@@ -473,6 +432,17 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
                     {"role": "model", "parts": [{"text": response_text}]}
                 )
 
+        elif api_type in ["glhf", "ddc", "openrouter"]:
+            wrapped_coroutine = await run_with_timeout(
+                call_openai_completion(api_type, model_id, user_context["messages"]),
+                timeout=60,
+                message=message
+            )
+            if wrapped_coroutine:
+                completion = await wrapped_coroutine
+                response_text = completion.choices[0].message.content
+                user_context["messages"].append({"role": "assistant", "content": response_text})
+
         if response_text:
             # Удаляем теги <think> и </think> из ответа модели
             response_text = response_text.replace("<think>", "").replace("</think>", "")
@@ -576,7 +546,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                     user_context["messages"].append(
                         {"role": "user", "parts": [{"text": long_message}]}
                     )
-            elif api_type in ["glhf", "g4f"]:
+            elif api_type in ["glhf", "g4f", "ddc", "openrouter"]:
                 user_context["messages"].append(
                     {"role": "user", "content": long_message}
                 )
@@ -613,14 +583,11 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                             await message.reply(f"🚨 Произошла ошибка при обработке запроса: {str(e)}")
                         return None
 
-                if api_type== "glhf":
-                    async def glhf_request():
-                        return await openai_client.chat.completions.create(
-                            model=model_id,
-                            messages=user_context["messages"],
-                        )
+                if api_type in ["glhf", "ddc", "openrouter"]:
                     wrapped_coroutine = await run_with_timeout(
-                        asyncio.to_thread(glhf_request), timeout=60, message=message
+                        call_openai_completion(api_type, model_id, user_context["messages"]),
+                        timeout=60,
+                        message=message
                     )
                     if wrapped_coroutine:
                         completion = await wrapped_coroutine
@@ -683,6 +650,8 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                     
                     if response:
                         response_text = response.text
+
+               
 
                 if response_text:
                     # Удаляем теги <think> и </think> из ответа модели
@@ -772,3 +741,23 @@ async def handle_long_message(message: types.Message, state: FSMContext):
     user_context["long_message"] += message.text + "\n"
     await save_context(user_id, user_context)
     await message.reply("🔔Сообщение добавлено к накоплению.")
+
+async def call_openai_completion(api_type, model, messages, **kwargs):
+
+    client = get_openai_client(api_type)
+    start_time = time.time()
+    start_timestamp = time.strftime("%H:%M:%S", time.localtime(start_time))
+    logging.info(f"[{start_timestamp}] Начало запроса к OpenAI API ({api_type}) с моделью {model}.")
+    try:
+        result = await asyncio.to_thread(client.chat.completions.create, model=model, messages=messages, **kwargs)
+        end_time = time.time()
+        duration = end_time - start_time
+        end_timestamp = time.strftime("%H:%M:%S", time.localtime(end_time))
+        logging.info(f"[{end_timestamp}] Запрос к OpenAI API ({api_type}) завершён за {duration:.2f} секунд.")
+        return result
+    except Exception as e:
+        end_time = time.time()
+        duration = end_time - start_time
+        end_timestamp = time.strftime("%H:%M:%S", time.localtime(end_time))
+        logging.error(f"[{end_timestamp}] Ошибка при выполнении запроса к OpenAI API ({api_type}) с моделью {model} после {duration:.2f} секунд: {e}")
+        raise
