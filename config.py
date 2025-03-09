@@ -174,7 +174,7 @@ g4f_web_search_client_providers = get_supported_providers(web_search_providers)
 
 g4f_client = Client(provider=RetryProvider(g4f_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
 
-g4f_image_client = Client(provider=RetryProvider(g4f_image_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))  # Change to 
+g4f_image_client = Client(provider=RetryProvider(g4f_image_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
 
 g4f_web_search_client = Client(provider=RetryProvider(g4f_web_search_client_providers, shuffle=False)) 
 

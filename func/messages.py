@@ -440,8 +440,15 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
             )
             if wrapped_coroutine:
                 completion = await wrapped_coroutine
-                response_text = completion.choices[0].message.content
-                user_context["messages"].append({"role": "assistant", "content": response_text})
+                logging.info(f"Полный ответ OpenRouter: {completion}")
+                if not completion or not hasattr(completion, "choices") or not completion.choices:
+                    logging.error(f"Ответ от OpenRouter API не содержит ожидаемых данных: {completion}")
+                    await message.reply("🚨 Ошибка: получен некорректный ответ от OpenRouter API.")
+                else:
+                    response_text = completion.choices[0].message.content
+                    user_context["messages"].append(
+                        {"role": "assistant", "content": response_text}
+                    )
 
         if response_text:
             # Удаляем теги <think> и </think> из ответа модели
