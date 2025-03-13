@@ -19,7 +19,7 @@ async def cmd_settings(message, state: FSMContext):
     DEFAULT_ENHANCE = await def_enhance()
     AVAILABLE_MODELS = await av_models()
 
-    current_model_key = user_context["model"]  # Формат: "model_id_api"
+    current_model_key = user_context["model"] 
     current_model = AVAILABLE_MODELS[current_model_key]['model_name'] if current_model_key in AVAILABLE_MODELS else "Unknown"
     
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
@@ -103,7 +103,6 @@ async def process_enhance_selection_handler(callback_query, state):
     user_context["enhance"] = not user_context.get("enhance", False)
     await save_context(user_id, user_context)
 
-    # Обновляем клавиатуру с новым состоянием
     DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
     DEFAULT_ASPECT_RATIO = await def_aspect()
     DEFAULT_ENHANCE = await def_enhance()
@@ -150,8 +149,7 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
     user_id = callback_query.from_user.id
     data = await state.get_data()
     
-    # Get model_id and api from callback_data
-    model_key = callback_query.data.split("model_")[1]  # Format: "model_id_api"
+    model_key = callback_query.data.split("model_")[1] 
     
     user_context = await load_context(user_id)
     AVAILABLE_MODELS = await av_models()

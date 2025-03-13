@@ -2,18 +2,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from config import Form, bot, dp, init_enhance_prompt_client
+
+from config import Form, bot, dp, init_enhance_prompt_client, update_image_client_for_recognition, openai_clients
 from database import load_context,save_context, is_admin,is_allowed, initialize_database, clear_all_user_contexts, initialize_models, rec_models, whisp_models, def_rec_model, def_gen_model, def_aspect, db_pool, def_enhance, init_all_user_clients
 
 from keyboards import get_admin_keyboard,get_glhf_keyboard,get_glhf_keyboard_with_admin_button,get_g4f_keyboard,get_g4f_keyboard_with_admin_button,get_gemini_keyboard,get_gemini_keyboard_with_admin_button
 
 from func.gemini import handle_pdf, process_custom_image_prompt, handle_image
-from func.g4f import process_image_generation_prompt, handle_image_recognition, handle_files_or_urls
+from func.g4f import process_image_generation_prompt, handle_image_recognition, handle_files_or_urls, process_image_editing
 
 from func.audio import handle_audio, process_whisper_model_selection
 from func.search import process_search_query
 from func.messages import handle_all_messages,cmd_long_message,handle_long_message
-from func.admin import cmd_add_user, cmd_add_model,cmd_add_image_gen_model,cmd_add_image_rec_model,cmd_delete_image_gen_model,cmd_delete_model,cmd_delete_image_rec_model,cmd_remove_user,process_add_user_id,process_remove_user_id,process_new_model_name,process_new_model_id,process_new_model_api,process_confirm_delete,process_delete_model_name,process_add_image_rec_model_name,process_delete_image_rec_model_name,process_confirm_delete_image_rec_model,process_add_image_gen_model_name,process_delete_image_gen_model_name,process_confirm_delete_image_gen_model, cmd_send_to_all, cmd_send_to_user, process_message_to_all, process_user_id_to_send, process_message_to_user
+from func.admin import cmd_add_user, cmd_add_model,cmd_add_image_gen_model,cmd_add_image_rec_model,cmd_delete_image_gen_model,cmd_delete_model,cmd_delete_image_rec_model,cmd_remove_user,process_add_user_id,process_remove_user_id,process_new_model_name,process_new_model_id,process_new_model_api,process_confirm_delete,process_delete_model_name,process_new_image_rec_model_id,process_new_image_rec_model_api,process_delete_image_rec_model_name,process_confirm_delete_image_rec_model,process_add_image_gen_model_name,process_delete_image_gen_model_name,process_confirm_delete_image_gen_model, cmd_send_to_all, cmd_send_to_user, process_message_to_all, process_user_id_to_send, process_message_to_user
 
 
 from settings import cmd_settings, select_model_handler, select_image_gen_model_handler, select_image_rec_model_handler, select_aspect_ratio_handler, process_enhance_selection_handler, close_settings_handler, model_selection_handler, process_image_generation_model_handler, process_image_recognition_model_selection_handler, process_aspect_ratio_selection_handler, toggle_web_search_handler, toggle_processing_time_handler
@@ -106,9 +107,6 @@ async def cmd_add_image_rec_model_handler(message: types.Message, state: FSMCont
 async def cmd_delete_image_rec_model_handler(message: types.Message, state: FSMContext):
     await cmd_delete_image_rec_model(message, state)
 
-@dp.message(Form.waiting_for_add_image_rec_model_name)
-async def process_add_image_rec_model_name_handler(message: types.Message, state: FSMContext):
-    await process_add_image_rec_model_name(message, state)
 
 @dp.callback_query(Form.waiting_for_delete_image_rec_model_name)
 async def process_delete_image_rec_model_name_handler(callback_query: types.CallbackQuery, state: FSMContext):
@@ -138,6 +136,22 @@ async def process_delete_image_gen_model_name_handler(callback_query: types.Call
 async def process_confirm_delete_image_gen_model_handler(callback_query: types.CallbackQuery, state: FSMContext):
     await process_confirm_delete_image_gen_model(callback_query, state)
 
+@dp.message(Form.waiting_for_new_image_rec_model_id)
+async def process_new_image_rec_model_id_handler(message: types.Message, state: FSMContext):
+    await process_new_image_rec_model_id(message, state)
+
+@dp.message(Form.waiting_for_new_image_rec_model_api)
+async def process_new_image_rec_model_api_handler(message: types.Message, state: FSMContext):
+    await process_new_image_rec_model_api(message, state)
+
+@dp.message(Form.waiting_for_image_edit_instructions)
+async def process_image_edit_instructions_handler(message: types.Message, state: FSMContext):
+    # Get the edit instructions
+    instructions = message.text
+    await state.update_data(image_edit_instructions=instructions)
+    
+    # Process the image editing
+    await process_image_editing(message, state)
 
 otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
 
@@ -369,6 +383,23 @@ async def cmd_generate_image(message: types.Message, state: FSMContext):
     await state.update_data(is_direct_image_gen=True)
     await state.set_state(Form.waiting_for_image_generation_prompt)
 
+@dp.message(Form.waiting_for_image_generation_prompt, F.photo)
+async def process_image_edit_prompt_handler(message: types.Message, state: FSMContext):
+    # Handle image for editing
+    photo = message.photo[-1]
+    file_id = photo.file_id
+    file = await bot.get_file(file_id)
+    file_path = file.file_path
+    
+    image_data = await bot.download_file(file_path)
+    
+    # Store the image data in state
+    await state.update_data(image_edit_data=image_data)
+    
+    # Ask for editing instructions
+    await message.reply("🖌️ Пожалуйста, опишите какие изменения нужно внести в изображение:")
+    await state.set_state(Form.waiting_for_image_edit_instructions)
+
 @dp.message(Form.waiting_for_image_generation_prompt)
 async def process_image_generation_prompt_handler(message: types.Message, state: FSMContext):
     await state.update_data(image_generation_prompt=message.text)
@@ -386,7 +417,6 @@ async def cmd_audio(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
 
     if current_state == Form.waiting_for_audio:
-        # Already in waiting mode, exit 
         await state.set_state(Form.waiting_for_message)
         await message.reply("🔔Режим ожидания аудио отключен.")
         return
@@ -435,7 +465,6 @@ async def handle_long_message_handler(message: types.Message, state: FSMContext)
 
 @dp.message()
 async def handle_all_messages_handler(message: types.Message, state: FSMContext):
-    # Проверка прав доступа пользователя
     if not is_allowed(message.from_user.id):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
@@ -446,14 +475,12 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
     if await state.get_state() is None:
         await state.set_state(Form.waiting_for_message)
 
-    # Определение модели и типа API
     model_key = user_context["model"]
     model_id, api_type = model_key.split('_')
     image_rec_models = await rec_models()
-
-    # Обработка документов
+    allowed_apis = list(openai_clients.keys()) + ["g4f"]
     if message.document:
-        if api_type in ["g4f", "glhf", "ddc", "openrouter"]:
+        if api_type in allowed_apis:
             await handle_files_or_urls(message, state)
         elif api_type == "gemini":
             if message.document.mime_type == "application/pdf":
@@ -466,32 +493,40 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
 
     # Обработка фотографий
     if message.photo:
-        if api_type == "g4f" and model_id in image_rec_models:
-            await state.set_state(Form.waiting_for_custom_image_recognition_prompt)
-            await handle_image_recognition(message, state)
-        elif api_type == "gemini":
-            if current_state == Form.waiting_for_image_and_prompt:
-                await message.reply("🔔Пожалуйста, сначала введите текстовый промпт.")
+        model_supported = False
+        
+        if api_type == "gemini":
+            model_supported = True
+        else:
+            # Создаем ключ в правильном формате для поиска в словаре
+            lookup_key = f"{model_id}_{api_type}"
+            if lookup_key in image_rec_models:
+                model_supported = True
+        
+        if model_supported:
+            if api_type == "g4f":
+                await update_image_client_for_recognition(message.from_user.id, model_id)
+                await state.set_state(Form.waiting_for_custom_image_recognition_prompt)
+                await handle_image_recognition(message, state)
+            elif api_type == "gemini":
+                if current_state == Form.waiting_for_image_and_prompt:
+                    await message.reply("🔔Пожалуйста, сначала введите текстовый промпт.")
+                else:
+                    await state.set_state(Form.waiting_for_image_and_prompt)
+                    await handle_image(message, state)
+            elif api_type in openai_clients:
+                if current_state == Form.waiting_for_image_and_prompt_openai:
+                    await message.reply("🔔Пожалуйста, сначала введите текстовый промпт.")
+                else:
+                    await state.set_state(Form.waiting_for_image_and_prompt_openai)
+                    await handle_image_openai(message, state)
             else:
-                await state.set_state(Form.waiting_for_image_and_prompt)
-                await handle_image(message, state)
-        elif api_type == "glhf" and model_id in ["openai", "openai-large"]:
-            if current_state == Form.waiting_for_image_and_prompt_openai:
-                await message.reply("🔔Пожалуйста, сначала введите текстовый промпт.")
-            else:
-                await state.set_state(Form.waiting_for_image_and_prompt_openai)
-                await handle_image_openai(message, state)
-        elif api_type == "openrouter" and model_id in ["qwen/qwen2.5-vl-72b-instruct:free", "qwen/qwen-vl-plus:free", "google/gemini-2.0-flash-exp:free", "google/gemini-2.0-flash-thinking-exp:free" "google/gemini-2.0-pro-exp-02-05:free"]:
-            if current_state == Form.waiting_for_image_and_prompt_openai:
-                await message.reply("🔔Пожалуйста, сначала введите текстовый промпт.")
-            else:
-                await state.set_state(Form.waiting_for_image_and_prompt_openai)
-                await handle_image_openai(message, state)
+                await message.reply("🔔Распознавание изображений настроено, но обработчик не найден.")
         else:
             await message.reply("🔔Распознавание изображений не поддерживается этой моделью.")
         return
 
-    # Обработка текстовых сообщений
+    # Обработка текстовых сообщенийc
     if current_state == Form.waiting_for_message:
         await handle_all_messages(message, state, is_admin, is_allowed)
     elif current_state == Form.waiting_for_image_and_prompt:
@@ -500,10 +535,13 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         else:
             await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
     elif current_state == Form.waiting_for_image_and_prompt_openai:
-        if message.text and (
-            (api_type == "glhf" and model_id in ["openai", "openai-large"]) or
-            (api_type == "openrouter" and model_id in ["qwen/qwen2.5-vl-72b-instruct:free", "qwen/qwen-vl-plus:free", "google/gemini-2.0-flash-exp:free", "google/gemini-2.0-flash-thinking-exp:free" "google/gemini-2.0-pro-exp-02-05:free"])
-        ):
+        model_supported = False
+        # Создаем ключ в правильном формате для поиска в словаре
+        lookup_key = f"{model_id}_{api_type}"
+        if lookup_key in image_rec_models:
+            model_supported = True
+        
+        if message.text and model_supported:
             await process_custom_image_prompt_openai(message, state)
         else:
             await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")

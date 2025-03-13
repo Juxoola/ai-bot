@@ -1,26 +1,27 @@
-from config import bot, g4f_client, get_client,Form
+from config import bot, g4f_client, get_client,Form, openai_clients
 import config
 from key import GEMINI_API_KEY
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database import load_context,save_context,def_enhance, def_gen_model, def_aspect
 from aiogram import types
 import asyncio
 import logging
-import concurrent
 from io import BytesIO
-import fitz  # PyMuPDF
 import tempfile
 import os
-from aiogram.enums import ParseMode
-from func.messages import fix_markdown
+from func.openai_image import run_with_timeout
 import aiohttp
 from urllib.parse import quote
 import random
-import aiofiles
 from google import genai
 from google.genai import types as genai_types
+from datetime import timedelta
+import time
+from PIL import Image
 
+new_api_models = ["flux", "turbo"]
+fresed_models = ["dall-e-3", "stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
+google_ai_models = ["gemini-2.0-flash-exp"]
 
 if GEMINI_API_KEY:
     genai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -29,6 +30,8 @@ else:
     logging.warning("GEMINI_API_KEY is not set. Google AI image generation will be unavailable.")
 
 async def process_image_generation_prompt(message: types.Message, state: FSMContext):
+    start_time = time.time()
+
     data = await state.get_data()
     prompt = data.get("image_generation_prompt")
     is_direct_image_gen = data.get("is_direct_image_gen", False)
@@ -65,9 +68,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     }
     width, height = aspect_ratio_options.get(aspect_ratio, (1024, 1024)) 
 
-    new_api_models = ["flux", "turbo"]
-    
-    google_ai_models = ["imagen-3.0-generate-002"]
 
     # Улучшение промпта для всех моделей, если enhance=True
     if enhance:
@@ -92,14 +92,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         async def fetch_image():
             encoded_prompt = quote(prompt)
             url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-
-            # Отображение модели
-            model_mapping = {
-                "flux": "flux",
-                "turbo": "turbo"
-            }
-            api_model_name = model_mapping.get(model_name, "turbo")  
-
+            api_model_name = model_name 
             params = {
                 "width": width,
                 "height": height,
@@ -119,7 +112,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                         else:
                             error_message = await response.text()
                             return response.status, error_message 
-
             except Exception as e:
                 logging.error(f"Error during image generation: {e}")
                 raise e
@@ -148,7 +140,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     if enhance:
                         caption += f", enhance: {enhance}"
                     caption += ":"
-
                     await bot.send_photo(
                         user_id,
                         photo=types.BufferedInputFile(image_data, filename="image.jpg"),
@@ -166,42 +157,111 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     elif model_name in google_ai_models:
         if genai_client:
             try:
-                google_ai_aspect_ratio = aspect_ratio
-                if aspect_ratio not in ["1:1", "3:4", "4:3", "9:16", "16:9"]:
-                    google_ai_aspect_ratio = "1:1" 
-
-                response = await asyncio.to_thread(
-                    lambda: genai_client.models.generate_image(
+                response_coroutine = asyncio.to_thread(
+                    lambda: genai_client.models.generate_content(
                         model=model_name,
-                        prompt=prompt,
-                        config=genai_types.GenerateImageConfig(
-                            number_of_images=1,
-                            aspect_ratio=google_ai_aspect_ratio,
-                            output_mime_type='image/jpeg'
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            response_modalities=['Text', 'Image']
                         )
                     )
                 )
-
-                image_data = response.generated_images[0].image.getvalue()
+                
+                response = await run_with_timeout(
+                    response_coroutine,
+                    timeout=60,
+                    msg=message
+                )
+                
+                if response is None:
+                    await bot.send_message(user_id, "🚨Превышено время ожидания при генерации изображения. Пожалуйста, попробуйте еще раз.")
+                    return
+                
+                image_data = None
+                text_response = ""
+                
+                if hasattr(response, 'candidates') and response.candidates and hasattr(response.candidates[0], 'content'):
+                    for part in response.candidates[0].content.parts:
+                        if part.text:
+                            text_response += part.text
+                        
+                        if part.inline_data is not None and part.inline_data.mime_type.startswith('image/'):
+                            image_data = part.inline_data.data
+                
+                if not image_data:
+                    error_message = "🚨Модель не сгенерировала изображение в ответе."
+                    if text_response:
+                        error_message += f"\n\nОтвет модели: {text_response}"
+                    await bot.send_message(user_id, error_message)
+                    return
 
                 caption = f"Фото сгенерировано моделью {model_name}"
-                caption += f" с соотношением сторон {google_ai_aspect_ratio}" 
+                if aspect_ratio:
+                    caption += f" с соотношением сторон {aspect_ratio}"
                 if enhance:
                     caption += f", enhance: {enhance}"
                 caption += ":"
-
+                
                 await bot.send_photo(
                     user_id,
                     photo=types.BufferedInputFile(image_data, filename="image.jpg"),
                     caption=caption,
                 )
+                
                 caption2 = "Фото без сжатия"
-                await bot.send_document(user_id, document=types.BufferedInputFile(image_data, filename="image.jpg"), caption=caption2)
+                await bot.send_document(
+                    user_id, 
+                    document=types.BufferedInputFile(image_data, filename="image.jpg"), 
+                    caption=caption2
+                )
+                
             except Exception as e:
                 logging.error(f"Error during Google AI image generation: {e}")
                 await bot.send_message(user_id, f"🚨Ошибка во время генерации изображения с помощью Google AI: {e}")
         else:
             await bot.send_message(user_id, "🚨Генерация изображений с помощью Google AI недоступна, так как не указан GEMINI_API_KEY.")
+
+    elif model_name in fresed_models:
+        client = openai_clients.get("fresed")
+        try:
+            size_str = f"{width}x{height}"
+            response = await client.images.generate(
+                model=model_name,
+                prompt=prompt,
+                size=size_str
+            )
+            if hasattr(response, 'generated_images'):
+                image_data = response.generated_images[0].image.getvalue()
+            elif hasattr(response, 'data') and response.data:
+                image_url = response.data[0].url
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(image_url) as resp:
+                        if resp.status == 200:
+                            image_data = await resp.read()
+                        else:
+                            raise Exception(f"Не удалось скачать изображение, статус: {resp.status}")
+            else:
+                raise Exception("Неподдерживаемый формат ответа от fresed client")
+            caption = f"Фото сгенерировано fresed моделью {model_name}"
+            if aspect_ratio:
+                caption += f" с соотношением сторон {aspect_ratio}"
+            if enhance:
+                caption += f", enhance: {enhance}"
+            caption += ":"
+            await bot.send_photo(
+                user_id,
+                photo=types.BufferedInputFile(image_data, filename="image.jpg"),
+                caption=caption,
+            )
+            caption2 = "Фото без сжатия"
+            await bot.send_document(
+                user_id,
+                document=types.BufferedInputFile(image_data, filename="image.jpg"),
+                caption=caption2,
+            )
+        except Exception as e:
+            logging.error(f"Error during fresed image generation: {e}")
+            await bot.send_message(user_id, f"🚨Ошибка во время генерации изображения с помощью Fresed client: {e}")
 
     else:
         image_gen_client = get_client(user_id, "g4f_image_gen_client", model_name=model_name)
@@ -239,6 +299,14 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             await bot.send_message(
                 user_id, f"🚨Ошибка во время генерации изображения: {e}"
             )
+
+    end_time = time.time()
+    processing_time = end_time - start_time
+    formatted_processing_time = str(timedelta(seconds=int(processing_time)))
+    service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
+
+    if user_context.get("show_processing_time", True):
+        await bot.send_message(user_id, service_info)
 
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_generation_prompt=None)
@@ -298,6 +366,7 @@ async def handle_files_or_urls(message: types.Message, state: FSMContext):
             user_context = await load_context(user_id)
             model_key = user_context["model"]  
             model_id, api_type = model_key.split('_')
+            allowed_apis = list(openai_clients.keys()) + ["g4f"]
 
             if api_type == "gemini":
                 last_message = user_context["messages"][-1] if user_context["messages"] else None
@@ -305,7 +374,7 @@ async def handle_files_or_urls(message: types.Message, state: FSMContext):
                     user_context["messages"][-1]["parts"].append({"text": file_content})
                 else:
                     user_context["messages"].append({"role": "user", "parts": [{"text": file_content}]})
-            elif api_type in ["glhf", "g4f", "openrouter", "ddc"]:
+            elif api_type in  allowed_apis:
                 user_context["messages"].append({"role": "user", "content": file_content})
 
             await save_context(user_id, user_context)
@@ -346,3 +415,106 @@ def process_local_file(file_path):
     except Exception as e:
         logging.error(f"Ошибка при обработке файла {file_path}: {e}")
         return "Error processing file"
+
+async def process_image_editing(message: types.Message, state: FSMContext):
+    start_time = time.time()
+    user_id = message.from_user.id
+    
+    data = await state.get_data()
+    image_data = data.get("image_edit_data")
+    instructions = data.get("image_edit_instructions")
+    
+    if not image_data or not instructions:
+        await message.reply("🚨 Не удалось получить данные изображения или инструкции по редактированию")
+        await state.set_state(Form.waiting_for_message)
+        return
+    
+    user_context = await load_context(user_id)
+    model_name = user_context.get("image_generation_model")
+    
+    if model_name in google_ai_models:
+        try:
+            image_bytes = BytesIO(image_data.read())
+            image_bytes.seek(0)
+            
+            pil_image = await asyncio.to_thread(lambda: Image.open(image_bytes))
+            
+            response_coroutine = asyncio.to_thread(
+                lambda: genai_client.models.generate_content(
+                    model=model_name,
+                    contents=[instructions, pil_image],
+                    config=genai_types.GenerateContentConfig(
+                        response_modalities=['Text', 'Image']
+                    )
+                )
+            )
+            
+            response = await run_with_timeout(
+                response_coroutine,
+                timeout=60, 
+                msg=message
+            )
+            
+            if response is None:
+                await bot.send_message(
+                    user_id, 
+                    "🚨 Превышено время ожидания при редактировании изображения. Пожалуйста, попробуйте еще раз."
+                )
+                await state.set_state(Form.waiting_for_message)
+                return
+            
+            edited_image_data = None
+            text_response = ""
+            
+            if hasattr(response, 'candidates') and response.candidates and hasattr(response.candidates[0], 'content'):
+                for part in response.candidates[0].content.parts:
+                    if hasattr(part, 'text') and part.text:
+                        text_response += part.text
+                    
+                    if hasattr(part, 'inline_data') and part.inline_data and part.inline_data.mime_type.startswith('image/'):
+                        edited_image_data = part.inline_data.data
+            
+            if not edited_image_data:
+                error_message = "🚨 Модель не сгенерировала отредактированное изображение в ответе."
+                if text_response:
+                    error_message += "\n\nОтвет модели: " + text_response[:3000]
+                await bot.send_message(user_id, error_message)
+                await state.set_state(Form.waiting_for_message)
+                return
+            
+            caption = f"✏️ Изображение отредактировано с помощью {model_name}"
+            await bot.send_photo(
+                user_id,
+                photo=types.BufferedInputFile(edited_image_data, filename="edited_image.jpg"),
+                caption=caption,
+            )
+            
+            if text_response:
+                await bot.send_message(user_id, text_response)
+            
+            await bot.send_document(
+                user_id, 
+                document=types.BufferedInputFile(edited_image_data, filename="edited_image.jpg"), 
+                caption="Отредактированное изображение без сжатия"
+            )
+            
+        except Exception as e:
+            logging.error(f"Error during image editing: {e}")
+            error_message = f"🚨 Ошибка при редактировании изображения: {str(e)[:200]}"
+            await bot.send_message(user_id, error_message)
+    else:
+        await bot.send_message(
+            user_id, 
+            "🚨 Редактирование изображений поддерживается только моделями Google AI. Пожалуйста, измените модель в настройках."
+        )
+    
+    end_time = time.time()
+    processing_time = end_time - start_time
+    formatted_processing_time = str(timedelta(seconds=int(processing_time)))
+    
+    if user_context.get("show_processing_time", True):
+        await bot.send_message(user_id, f"⏳ Время обработки запроса: {formatted_processing_time}")
+    
+    await state.set_state(Form.waiting_for_message)
+    await state.update_data(image_edit_data=None)
+    await state.update_data(image_edit_instructions=None)

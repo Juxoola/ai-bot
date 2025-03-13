@@ -7,6 +7,7 @@ OPEN_ROUTER_KEY = os.environ.get("OPEN_ROUTER_KEY", "default_open_router_key")
 GLHF_API_KEY = os.environ.get("GLHF_API_KEY", "default_glhf_api_key")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "default_gemini_api_key")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "default_groq_api_key")
+FRESED_API_KEY = os.environ.get("FRESED_API_KEY", "default_fresed_api_key")
 
 # Allowed user IDs
 allowed_users_env = os.environ.get("ALLOWED_USER_IDS")

@@ -7,6 +7,7 @@ import asyncio
 from collections import deque
 from contextlib import asynccontextmanager
 import os
+from config import openai_clients
 AVAILABLE_MODELS = None
 IMAGE_GENERATION_MODELS = None
 IMAGE_RECOGNITION_MODELS = None
@@ -63,7 +64,24 @@ DEFAULT_MODELS = [
 
 DEFAULT_IMAGE_GEN_MODELS = ["flux", "turbo", "flux-schnell", "flux-dev", "sd-3.5", "sdxl-turbo" ]
 
-DEFAULT_IMAGE_RECOGNITION_MODELS = ["gpt-4o", "gemini-1.5-flash", "llama-3.1-405b" , "llama-3.1-70b","gemini-2.0-flash", "gpt-4o-mini" ,'llama-3.2-90b', 'minicpm-2.5']
+DEFAULT_IMAGE_RECOGNITION_MODELS = [
+    {"model_id": "blackboxai", "api": "g4f"},
+    {"model_id": "gpt-4o", "api": "g4f"},
+    {"model_id": "o1", "api": "g4f"},
+    {"model_id": "o3-mini", "api": "g4f"},
+    {"model_id": "gemini-1.5-pro", "api": "g4f"},
+    {"model_id": "gemini-1.5-flash", "api": "g4f"},
+    {"model_id": "llama-3.1-8b", "api": "g4f"},
+    {"model_id": "llama-3.1-70b", "api": "g4f"},
+    {"model_id": "llama-3.1-405b", "api": "g4f"},
+    {"model_id": "gemini-2.0-flash", "api": "g4f"},
+    {"model_id": "deepseek-v3", "api": "g4f"},
+    {"model_id": "llama-3.2-90b", "api": "g4f"},
+    {"model_id": "minicpm-2.5", "api": "g4f"},
+    {"model_id": "gpt-4o-mini", "api": "g4f"},
+    {"model_id": "o1-mini", "api": "g4f"}
+
+]
 
 DEFAULT_WHISPER_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]
 
@@ -191,7 +209,9 @@ async def initialize_database():
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS image_recognition_models (
-                name TEXT PRIMARY KEY
+                model_id TEXT,
+                api TEXT,
+                PRIMARY KEY (model_id, api)
             )
             """
         )
@@ -289,13 +309,15 @@ async def initialize_database():
             await db.commit()
             loaded_image_gen_models = DEFAULT_IMAGE_GEN_MODELS
 
-        async with db.execute("SELECT name FROM image_recognition_models") as cursor:
+        async with db.execute("SELECT model_id, api FROM image_recognition_models") as cursor:
             rows = await cursor.fetchall()
-            loaded_image_rec_models = [row[0] for row in rows]
+            loaded_image_rec_models = [{"model_id": row[0], "api": row[1]} for row in rows]
 
         if not loaded_image_rec_models:
-            await db.executemany("INSERT INTO image_recognition_models (name) VALUES (?)",
-                                 [(model_name,) for model_name in DEFAULT_IMAGE_RECOGNITION_MODELS])
+            await db.executemany(
+                "INSERT INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                [(model["model_id"], model["api"]) for model in DEFAULT_IMAGE_RECOGNITION_MODELS]
+            )
             await db.commit()
             loaded_image_rec_models = DEFAULT_IMAGE_RECOGNITION_MODELS
 
@@ -366,6 +388,7 @@ async def load_context(user_id):
                 }
                 return context
             else:
+                allowed_apis = list(openai_clients.keys()) + ["g4f"]
                 async with db.execute("SELECT model_id, api FROM models WHERE model_id = ?", (DEFAULT_MODEL,)) as cursor:
                     model_row = await cursor.fetchone()
                     model_id = model_row[0] if model_row else DEFAULT_MODEL
@@ -373,7 +396,7 @@ async def load_context(user_id):
 
                 context = {
                     "model": f"{model_id}_{api_type}", 
-                    "messages": [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}] if api_type in ["glhf", "g4f", "ddc", "openrouter"] else [],
+                    "messages": [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}] if api_type in allowed_apis else [],
                     "api_type": api_type,
                     "g4f_image": None,
                     "long_message": "",
@@ -474,9 +497,9 @@ async def load_image_recognition_models():
     try:
         async with get_db_connection() as db:
             models = []
-            async with db.execute("SELECT name FROM image_recognition_models") as cursor:
+            async with db.execute("SELECT model_id, api FROM image_recognition_models") as cursor:
                 async for row in cursor:
-                    models.append(row[0])
+                    models.append({"model_id": row[0], "api": row[1]})
             return models
     except Exception as e:
         print(f"Error loading image recognition models: {e}")
@@ -535,8 +558,8 @@ async def save_image_recognition_models(models):
             try:
                 await cursor.execute("DELETE FROM image_recognition_models")
                 await cursor.executemany(
-                    "INSERT INTO image_recognition_models (name) VALUES (?)",
-                    [(model_name,) for model_name in models],
+                    "INSERT INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                    [(model["model_id"], model["api"]) for model in models],
                 )
                 await db.commit()
             except Exception as e:
@@ -585,10 +608,25 @@ async def gen_models():
     return IMAGE_GENERATION_MODELS
 
 async def rec_models():
-    return IMAGE_RECOGNITION_MODELS
+    try:
+        async with get_db_connection() as db:
+            models = {}
+            async with db.execute("SELECT model_id, api FROM image_recognition_models") as cursor:
+                async for row in cursor:
+                    model_id = row[0]
+                    api = row[1]
+                    key = f"{model_id}_{api}"
+                    models[key] = {
+                        "model_id": model_id,
+                        "api": api
+                    }
+            return models
+    except Exception as e:
+        print(f"Error loading image recognition models: {e}")
+        return {}
 
 async def def_rec_model():
-    return DEFAULT_IMAGE_RECOGNITION_MODEL
+    return {"model_id": DEFAULT_IMAGE_RECOGNITION_MODEL, "api": "g4f"}
 
 async def def_aspect():
     return DEFAULT_ASPECT_RATIO

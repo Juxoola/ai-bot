@@ -1,9 +1,8 @@
 from aiogram.fsm.context import FSMContext
-from config import Form, get_client, get_openai_client
+from config import Form, get_client, get_openai_client, openai_clients
 import tempfile
 import os
 from datetime import timedelta
-import config
 from database import load_context,save_context, av_models
 from aiogram import types
 import asyncio
@@ -12,7 +11,6 @@ from aiogram.enums import ParseMode
 import time
 import aiohttp
 import google.generativeai as genai
-
 from keyboards import get_g4f_keyboard, get_g4f_keyboard_with_admin_button, get_gemini_keyboard, get_gemini_keyboard_with_admin_button, get_glhf_keyboard, get_glhf_keyboard_with_admin_button
 import re
 
@@ -249,6 +247,8 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
     ):
         await state.set_state(Form.waiting_for_message)
 
+    allowed_apis = list(openai_clients.keys()) + ["g4f"]
+
     if (
         current_state == Form.waiting_for_message
         and api_type == "gemini"
@@ -268,7 +268,8 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
             user_context["messages"].append(
                 {"role": "user", "parts": [{"text": message.text}]}
             )
-    elif api_type in ["glhf", "ddc", "g4f", "openrouter"]:
+    elif api_type in allowed_apis:
+        
         user_context["messages"].append(
             {"role": "user", "content": message.text}
         )
@@ -432,7 +433,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
                     {"role": "model", "parts": [{"text": response_text}]}
                 )
 
-        elif api_type in ["glhf", "ddc", "openrouter"]:
+        elif api_type in openai_clients:
             wrapped_coroutine = await run_with_timeout(
                 call_openai_completion(api_type, model_id, user_context["messages"]),
                 timeout=60,
@@ -440,10 +441,9 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
             )
             if wrapped_coroutine:
                 completion = await wrapped_coroutine
-                logging.info(f"Полный ответ OpenRouter: {completion}")
                 if not completion or not hasattr(completion, "choices") or not completion.choices:
-                    logging.error(f"Ответ от OpenRouter API не содержит ожидаемых данных: {completion}")
-                    await message.reply("🚨 Ошибка: получен некорректный ответ от OpenRouter API.")
+                    logging.error(f"Ответ от {api_type} API не содержит ожидаемых данных: {completion}")
+                    await message.reply(f"🚨 Ошибка: получен некорректный ответ от {api_type} API.")
                 else:
                     response_text = completion.choices[0].message.content
                     user_context["messages"].append(
@@ -536,6 +536,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
 
             long_message = user_context["long_message"]
             user_context["long_message"] = ""  
+            allowed_apis = list(openai_clients.keys()) + ["g4f"]
 
             if api_type == "gemini":
                 last_message = (
@@ -553,7 +554,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                     user_context["messages"].append(
                         {"role": "user", "parts": [{"text": long_message}]}
                     )
-            elif api_type in ["glhf", "g4f", "ddc", "openrouter"]:
+            elif api_type in allowed_apis:
                 user_context["messages"].append(
                     {"role": "user", "content": long_message}
                 )
@@ -574,7 +575,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                             try:
                                 await task
                             except asyncio.CancelledError:
-                                pass  # Ожидаемое поведение при отмене
+                                pass 
                             except Exception as e:
                                 logging.error(f"Ошибка при отмене задачи: {e}")
                         
@@ -590,7 +591,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
                             await message.reply(f"🚨 Произошла ошибка при обработке запроса: {str(e)}")
                         return None
 
-                if api_type in ["glhf", "ddc", "openrouter"]:
+                if api_type in openai_clients:
                     wrapped_coroutine = await run_with_timeout(
                         call_openai_completion(api_type, model_id, user_context["messages"]),
                         timeout=60,

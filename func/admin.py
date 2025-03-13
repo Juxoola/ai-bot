@@ -1,5 +1,5 @@
 from aiogram.fsm.context import FSMContext
-from config import Form, bot
+from config import Form, bot, openai_clients
 import logging
 from database import is_admin,gen_models, av_models, rec_models,init_av_models, init_gen_models,init_rec_models,initialize_allowed_users,DATABASE_FILE, get_all_allowed_users
 from keyboards import get_image_gen_model_selection_keyboard,get_image_recognition_model_selection_keyboard, get_model_selection_keyboard
@@ -75,13 +75,20 @@ async def process_new_model_name(message: types.Message, state: FSMContext):
 async def process_new_model_id(message: types.Message, state: FSMContext):
     model_id = message.text
     await state.update_data(new_model_id=model_id)
-    await message.reply("Введите тип API новой модели для чата (glhf, gemini, g4f, ddc, openrouter):")
+    allowed_apis = list(openai_clients.keys()) + ["gemini" , "g4f"]
+    available = ", ".join(allowed_apis)
+    await message.reply(f"Введите тип API новой модели для чата {available}:")
     await state.set_state(Form.waiting_for_new_model_api)
 
 async def process_new_model_api(message: types.Message, state: FSMContext):
-    model_api = message.text.lower()  # Приводим к нижнему регистру для унификации
-    if model_api not in ["glhf", "gemini", "g4f", "ddc", "openrouter"]:
-        await message.reply("Неверный тип API. Пожалуйста, используйте команду /add_model снова и введите 'glhf', 'gemini', 'g4f' или 'openrouter'.")
+    model_api = message.text.lower()
+
+
+    allowed_apis = list(openai_clients.keys()) + ["gemini" , "g4f"]
+
+    if model_api not in allowed_apis:
+        available = ", ".join(allowed_apis)
+        await message.reply(f"Неверный тип API. Допустимые: {available}")
         await state.set_state(Form.waiting_for_message)
         return
 
@@ -192,19 +199,48 @@ async def cmd_add_image_rec_model(message: types.Message, state: FSMContext):
         await message.reply("Извините, у вас нет прав для выполнения этого действия.")
         return
 
-    await message.reply("Введите имя новой модели для распознавания изображений:")
-    await state.set_state(Form.waiting_for_add_image_rec_model_name)
+    await message.reply("Введите ID новой модели для распознавания изображений:")
+    await state.set_state(Form.waiting_for_new_image_rec_model_id)
 
-async def process_add_image_rec_model_name(message: types.Message, state: FSMContext):
-    model_name = message.text
+async def process_new_image_rec_model_id(message: types.Message, state: FSMContext):
+    model_id = message.text
+    await state.update_data(new_image_rec_model_id=model_id)
+    allowed_apis = list(openai_clients.keys()) + ["gemini" , "g4f"]
+    available = ", ".join(allowed_apis)
+    await message.reply(f"Введите тип API для модели распознавания изображений {available}")
+    await state.set_state(Form.waiting_for_new_image_rec_model_api)
 
+async def process_new_image_rec_model_api(message: types.Message, state: FSMContext):
+    model_api = message.text.lower() 
+    
+    allowed_apis = list(openai_clients.keys()) + ["gemini" , "g4f"]
+
+    if model_api not in allowed_apis:
+        available = ", ".join(allowed_apis)
+        await message.reply(f"Неверный тип API. Пожалуйста, используйте команду /add_image_rec_model снова и введите {available}")
+        await state.set_state(Form.waiting_for_message)
+        return
+    
+    data = await state.get_data()
+    model_id = data.get("new_image_rec_model_id")
+    
     async with aiosqlite.connect(DATABASE_FILE) as db:
-        await db.execute("INSERT INTO image_recognition_models (name) VALUES (?)", (model_name,))
+        async with db.execute("SELECT 1 FROM image_recognition_models WHERE model_id = ? AND api = ?", 
+                            (model_id, model_api)) as cursor:
+            if await cursor.fetchone() is not None:
+                await message.reply(f"Модель с ID {model_id} и API {model_api} уже существует. Пожалуйста, используйте другие параметры.")
+                await state.set_state(Form.waiting_for_message)
+                return
+        
+        await db.execute(
+            "INSERT INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+            (model_id, model_api)
+        )
         await db.commit()
-
+    
     await init_rec_models()
-
-    await message.reply(f"Модель {model_name} успешно добавлена для распознавания изображений!")
+    
+    await message.reply(f"Модель {model_id} с API {model_api} успешно добавлена для распознавания изображений!")
     await state.set_state(Form.waiting_for_message)
 
 async def cmd_delete_image_rec_model(message: types.Message, state: FSMContext):
@@ -222,7 +258,7 @@ async def cmd_delete_image_rec_model(message: types.Message, state: FSMContext):
     await state.set_state(Form.waiting_for_delete_image_rec_model_name)
 
 async def process_delete_image_rec_model_name(callback_query: types.CallbackQuery, state: FSMContext):
-    model_name = callback_query.data.split('_', 2)[2] if callback_query.data.startswith('rec_model_') else callback_query.data
+    model_data = callback_query.data.split('_', 2)[2] if callback_query.data.startswith('rec_model_') else callback_query.data
     
     data = await state.get_data()
     delete_image_rec_model_message_id = data.get("delete_image_rec_model_message_id")
@@ -232,46 +268,53 @@ async def process_delete_image_rec_model_name(callback_query: types.CallbackQuer
         except Exception as e:
             logging.error(f"Ошибка при удалении сообщения выбора модели для удаления: {e}")
 
-    if model_name == "cancel_delete_image_rec":
+    if model_data == "cancel_delete_image_rec":
         await bot.send_message(callback_query.from_user.id, "Удаление модели распознавания изображений отменено.")
         await state.set_state(Form.waiting_for_message)
         return
 
     IMAGE_RECOGNITION_MODELS = await rec_models()
-    if model_name not in IMAGE_RECOGNITION_MODELS:
+    if model_data not in IMAGE_RECOGNITION_MODELS:
         await bot.send_message(callback_query.from_user.id, "Модель не найдена.")
         await state.set_state(Form.waiting_for_message)
         return
 
-    await state.update_data(delete_image_rec_model_name=model_name)
+    model_id, api = model_data.split('_', 1)
+    
+    await state.update_data(
+        delete_image_rec_model_id=model_id,
+        delete_image_rec_model_api=api
+    )
+    
     await bot.send_message(callback_query.from_user.id,
-                         f"Вы уверены, что хотите удалить модель '{model_name}' для распознавания изображений? (да/нет)",
+                         f"Вы уверены, что хотите удалить модель '{model_id}' с API '{api}' для распознавания изображений? (да/нет)",
                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                              [InlineKeyboardButton(text="Да", callback_data="confirm_delete_image_rec_yes"),
                               InlineKeyboardButton(text="Нет", callback_data="confirm_delete_image_rec_no")]
                          ]))
     await state.set_state(Form.waiting_for_confirmation_image_rec_model_delete)
 
-
 async def process_confirm_delete_image_rec_model(
     callback_query: types.CallbackQuery, state: FSMContext
 ):
     confirmation = callback_query.data.split("_", 4)[4]
     data = await state.get_data()
-    model_name = data.get("delete_image_rec_model_name")
+    model_id = data.get("delete_image_rec_model_id")
+    api = data.get("delete_image_rec_model_api")
 
     await bot.answer_callback_query(callback_query.id)
 
     if confirmation == "yes":
         async with aiosqlite.connect(DATABASE_FILE) as db:
-            await db.execute("DELETE FROM image_recognition_models WHERE name = ?", (model_name,))
+            await db.execute("DELETE FROM image_recognition_models WHERE model_id = ? AND api = ?", 
+                           (model_id, api))
             await db.commit()
 
         await init_rec_models()
 
         await bot.send_message(
             callback_query.from_user.id,
-            f"Модель '{model_name}' успешно удалена для распознавания изображений!",
+            f"Модель '{model_id}' с API '{api}' успешно удалена для распознавания изображений!",
         )
     else:
         await bot.send_message(
@@ -342,8 +385,8 @@ async def process_delete_image_gen_model_name(callback_query: types.CallbackQuer
     await bot.send_message(callback_query.from_user.id,
                          f"Вы уверены, что хотите удалить модель '{model_name}' для генерации изображений? (да/нет)",
                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                             [InlineKeyboardButton(text="Да", callback_data="confirm_delete_image_gen_yes"),  # Исправлено здесь
-                              InlineKeyboardButton(text="Нет", callback_data="confirm_delete_image_gen_no")]  # Исправлено здесь
+                             [InlineKeyboardButton(text="Да", callback_data="confirm_delete_image_gen_yes"),  
+                              InlineKeyboardButton(text="Нет", callback_data="confirm_delete_image_gen_no")]  
                          ]))
     await state.set_state(Form.waiting_for_confirmation_image_gen_model_delete)
 

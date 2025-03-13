@@ -1,5 +1,5 @@
 from aiogram.fsm.context import FSMContext
-from config import  get_client, Form, openai_client,  g4f_image_client, openai_client2
+from config import  get_client, Form, openai_clients
 from func.messages import fix_markdown, send_message_in_parts
 from database import load_context, save_context, av_models
 from aiogram import types
@@ -80,7 +80,6 @@ def scrape_text(html: str, max_words: int = None, add_source=True, count_images:
         if select:
             soup = select
             break
-    # Zdnet
     for remove in [".c-globalDisclosure"]:
         select = soup.select_one(remove)
         if select:
@@ -266,17 +265,16 @@ async def process_search_query(message: types.Message, state: FSMContext):
 Запрос пользователя:
 {query}
 """     
-        
-        if api_type in ["glhf", "g4f", "ddc", "openrouter"]:
+        allowed_apis = list(openai_clients.keys()) + ["g4f"]
+        if api_type in allowed_apis:
             user_context["messages"].append({"role": "user", "content": search_message})
         elif api_type == "gemini":
             user_context["messages"].append({"role": "user", "parts": [{"text": search_message}]})
 
         response_text = None
 
-        if api_type in ["glhf", "ddc", "openrouter"]:
-            # Аналогично messages: сначала запускаем call_openai_completion через run_with_timeout,
-            # затем выполняем второй await для получения результата.
+        if api_type in openai_clients:
+
             wrapped_coro = await run_with_timeout(
                 call_openai_completion(api_type, model_id, user_context["messages"]),
                 timeout=60
@@ -324,7 +322,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
                         )
                         await message.answer(response_text)
 
-        if api_type in ["glhf", "g4f", "ddc", "openrouter"]:
+        if api_type in allowed_apis:
             user_context["messages"].append({"role": "assistant", "content": response_text})
         elif api_type == "gemini":
             user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
