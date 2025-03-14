@@ -11,7 +11,7 @@ from aiogram.enums import ParseMode
 import time
 import aiohttp
 import google.generativeai as genai
-from keyboards import get_g4f_keyboard, get_g4f_keyboard_with_admin_button, get_gemini_keyboard, get_gemini_keyboard_with_admin_button, get_glhf_keyboard, get_glhf_keyboard_with_admin_button
+from keyboards import get_main_keyboard
 import re
 
 # Список Markdown-символов, которые нужно отслеживать
@@ -396,9 +396,6 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
 
                 if response:
                     response_text = response.choices[0].message.content
-                    if(model_id in ['o3-mini-low']):
-                        response_text = await convert_dashed_code_blocks_to_markdown(response_text)
-
                     logging.info(f"Запрос к G4F API завершен за {time.time() - start_time:.5f} секунд")
 
                     user_context["messages"].append(
@@ -476,21 +473,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
             else:
                 
                 try:
-                    if api_type == "g4f":
-                        if is_admin(message.from_user.id):
-                            await message.answer(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=await get_g4f_keyboard_with_admin_button())
-                        else:
-                            await message.answer(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=await get_g4f_keyboard())
-                    elif api_type == "gemini":
-                        if is_admin(message.from_user.id):
-                            await message.answer(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=await get_gemini_keyboard_with_admin_button())
-                        else:
-                            await message.answer(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=await get_gemini_keyboard())
-                    else:
-                        if is_admin(message.from_user.id):
-                            await message.answer(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=await get_glhf_keyboard_with_admin_button())
-                        else:
-                            await message.answer(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=await get_glhf_keyboard())
+                    await message.answer(response_text, parse_mode=ParseMode.MARKDOWN)
                 except Exception as e:
                     logging.error(f"Ошибка Markdown при отправке сообщения: {e}")
                     try:
@@ -640,8 +623,6 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
 
                         if response:
                             response_text = response.choices[0].message.content
-                            if(model_id in ['o3-mini-low']):
-                                response_text = await convert_dashed_code_blocks_to_markdown(response_text)
 
                 elif api_type== "gemini":
                     def gemini_request():

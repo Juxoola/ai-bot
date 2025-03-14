@@ -28,28 +28,7 @@ async def get_admin_keyboard():
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-async def get_glhf_keyboard():
-    keyboard = [
-        [
-            KeyboardButton(text="⚙️ Настройки"),
-            KeyboardButton(text="🗑️ Очистить")
-        ],
-        [
-            KeyboardButton(text="🎨 Сгенерировать"),
-            KeyboardButton(text="🌐 Поиск")
-        ],
-        [
-            KeyboardButton(text="🎤 Аудио"),
-            KeyboardButton(text="📝 Длинное сообщение"),
-
-        ],
-        [
-             KeyboardButton(text="ℹ️ Помощь")
-        ]
-    ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
-async def get_glhf_keyboard_with_admin_button():
+async def get_main_keyboard(include_admin_button=False):
     keyboard = [
         [
             KeyboardButton(text="⚙️ Настройки"),
@@ -62,105 +41,15 @@ async def get_glhf_keyboard_with_admin_button():
         [
             KeyboardButton(text="🎤 Аудио"),
             KeyboardButton(text="📝 Длинное сообщение")
-
-        ],
-        [
-             KeyboardButton(text="ℹ️ Помощь")
-        ],
-        [
-            KeyboardButton(text="Открыть админ-клавиатуру")
-        ]
-    ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
-async def get_gemini_keyboard():
-    keyboard = [
-        [
-            KeyboardButton(text="⚙️ Настройки"),
-            KeyboardButton(text="🗑️ Очистить")
-        ],
-        [
-            KeyboardButton(text="🎨 Сгенерировать"),
-            KeyboardButton(text="🌐 Поиск"),
-        ],
-        [
-            KeyboardButton(text="🎤 Аудио"),
-            KeyboardButton(text="📝 Длинное сообщение"),
-        ],
-        [
-             KeyboardButton(text="ℹ️ Помощь")
-        ]
-    ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
-async def get_gemini_keyboard_with_admin_button():
-    keyboard = [
-        [
-            KeyboardButton(text="⚙️ Настройки"),
-            KeyboardButton(text="🗑️ Очистить")
-        ],
-        [
-            KeyboardButton(text="🎨 Сгенерировать"),
-            KeyboardButton(text="🌐 Поиск"),
-        ],
-        [
-            KeyboardButton(text="🎤 Аудио"),
-            KeyboardButton(text="📝 Длинное сообщение"),
         ],
         [
             KeyboardButton(text="ℹ️ Помощь")
-        ],
-        [
-            KeyboardButton(text="Открыть админ-клавиатуру")
         ]
     ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
-async def get_g4f_keyboard():
-    keyboard = [
-        [
-            KeyboardButton(text="⚙️ Настройки"),
-            KeyboardButton(text="🗑️ Очистить")
-        ],
-        [
-            KeyboardButton(text="🎨 Сгенерировать"),
-            KeyboardButton(text="🌐 Поиск")
-
-        ],
-        [
-            KeyboardButton(text="🎤 Аудио"),
-            KeyboardButton(text="📝 Длинное сообщение")
-        
-        ],
-        [
-             KeyboardButton(text="ℹ️ Помощь")
-        ]
-    ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
-async def get_g4f_keyboard_with_admin_button():
-    keyboard = [
-        [
-            KeyboardButton(text="⚙️ Настройки"),
-            KeyboardButton(text="🗑️ Очистить")
-        ],
-        [
-            KeyboardButton(text="🎨 Сгенерировать"),
-            KeyboardButton(text="🌐 Поиск")
-
-        ],
-        [
-            KeyboardButton(text="🎤 Аудио"),
-            KeyboardButton(text="📝 Длинное сообщение")
-        
-        ],
-        [
-            KeyboardButton(text="ℹ️ Помощь")
-        ],
-        [
-        KeyboardButton(text="Открыть админ-клавиатуру")
-        ]
-    ]
+    
+    if include_admin_button:
+        keyboard.append([KeyboardButton(text="Открыть админ-клавиатуру")])
+    
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 async def get_model_selection_keyboard(available_models):

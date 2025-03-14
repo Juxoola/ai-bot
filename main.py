@@ -4,9 +4,9 @@ load_dotenv()
 
 
 from config import Form, bot, dp, init_enhance_prompt_client, update_image_client_for_recognition, openai_clients
-from database import load_context,save_context, is_admin,is_allowed, initialize_database, clear_all_user_contexts, initialize_models, rec_models, whisp_models, def_rec_model, def_gen_model, def_aspect, db_pool, def_enhance, init_all_user_clients
+from database import load_context,save_context, is_admin,is_allowed, initialize_database, clear_all_user_contexts, initialize_models, rec_models, whisp_models, def_rec_model, def_gen_model, def_aspect, db_pool, def_enhance, init_all_user_clients, av_models, rec_models
 
-from keyboards import get_admin_keyboard,get_glhf_keyboard,get_glhf_keyboard_with_admin_button,get_g4f_keyboard,get_g4f_keyboard_with_admin_button,get_gemini_keyboard,get_gemini_keyboard_with_admin_button
+from keyboards import get_admin_keyboard, get_main_keyboard
 
 from func.gemini import handle_pdf, process_custom_image_prompt, handle_image
 from func.g4f import process_image_generation_prompt, handle_image_recognition, handle_files_or_urls, process_image_editing
@@ -158,7 +158,8 @@ otvet = "У вас нет доступа к этому боту.\nВам [сюд
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
+        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN,
+                          reply_markup=await get_main_keyboard(include_admin_button=False))
         return
 
     user_id = message.from_user.id
@@ -167,45 +168,18 @@ async def cmd_start(message: types.Message, state: FSMContext):
     
     await save_context(user_id, user_context)
 
-    if api_type== "g4f":
-        if is_admin(user_id):
-            await message.reply(
-                "Привет, админ! Я чат-бот, который может использовать различные ИИ-модели.\n"
-                "Используйте /help, чтобы увидеть доступные команды.",
-                reply_markup= await get_g4f_keyboard_with_admin_button()
-            )
-        else:
-            await message.reply(
-                "Привет! Я чат-бот, который может использовать различные ИИ-модели.\n"
-                "Используйте /help, чтобы увидеть доступные команды.",
-                reply_markup=await get_g4f_keyboard()
-            )
-    elif api_type == "gemini":
-        if is_admin(user_id):
-            await message.reply(
-                "Привет, админ! Я чат-бот, который может использовать различные ИИ-модели.\n"
-                "Используйте /help, чтобы увидеть доступные команды.",
-                reply_markup=await get_gemini_keyboard_with_admin_button()
-            )
-        else:
-            await message.reply(
-                "Привет! Я чат-бот, который может использовать различные ИИ-модели.\n"
-                "Используйте /help, чтобы увидеть доступные команды.",
-                reply_markup=await get_gemini_keyboard()
-            )
-    else: 
-        if is_admin(user_id):
-            await message.reply(
-                "Привет, админ! Я чат-бот, который может использовать различные ИИ-модели.\n"
-                "Используйте /help, чтобы увидеть доступные команды.",
-                reply_markup=await get_glhf_keyboard_with_admin_button()
-            )
-        else:
-            await message.reply(
-                "Привет! Я чат-бот, который может использовать различные ИИ-модели.\n"
-                "Используйте /help, чтобы увидеть доступные команды.",
-                reply_markup=await get_glhf_keyboard()
-            )
+    if is_admin(user_id):
+        await message.reply(
+            "Привет, админ! Я чат-бот, который может использовать различные ИИ-модели.\n"
+            "Используйте /help, чтобы увидеть доступные команды.",
+            reply_markup=await get_main_keyboard(include_admin_button=True)
+        )
+    else:
+        await message.reply(
+            "Привет! Я чат-бот, который может использовать различные ИИ-модели.\n"
+            "Используйте /help, чтобы увидеть доступные команды.",
+            reply_markup=await get_main_keyboard(include_admin_button=False)
+        )
 
     await state.set_state(Form.waiting_for_message)
 
@@ -216,18 +190,7 @@ async def cmd_open_admin_keyboard(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Главное меню", lambda message: is_admin(message.from_user.id))
 async def cmd_back_to_main_menu(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    user_context = await load_context(user_id)
-    api_type = user_context["api_type"]
-
-    if api_type == "g4f":
-        reply_markup = await get_g4f_keyboard_with_admin_button()
-    elif api_type == "gemini":
-        reply_markup = await get_gemini_keyboard_with_admin_button()
-    else: 
-        reply_markup = await get_glhf_keyboard_with_admin_button()
-
-    await message.reply("🔔Вы вернулись в главное меню.", reply_markup=reply_markup)
+    await message.reply("🔔Вы вернулись в главное меню.", reply_markup=await get_main_keyboard(include_admin_button=True))
     await state.set_state(Form.waiting_for_message)
 
 
@@ -238,7 +201,10 @@ async def cmd_help(message: types.Message, state: FSMContext):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
     
-    await message.reply(
+    AVAILABLE_MODELS = await av_models()
+    REC_MODELS = await rec_models()
+    
+    help_text = (
         "Доступные команды:\n"
         "/start - Запустить бота\n"
         "/help - Показать это справочное сообщение\n"
@@ -250,6 +216,33 @@ async def cmd_help(message: types.Message, state: FSMContext):
         "/long_message - Режим накопления сообщений\n"
         "Также можно присылать pdf и изображения\n"
     )
+    
+    await message.reply(help_text)
+    
+    rec_models_by_api = {}
+    for model_key, model_data in REC_MODELS.items():
+        api = model_data["api"]
+        if api not in rec_models_by_api:
+            rec_models_by_api[api] = []
+        
+        model_id = model_data["model_id"]
+        display_name = None
+        lookup_key = f"{model_id}_{api}"
+        
+        if lookup_key in AVAILABLE_MODELS:
+            display_name = AVAILABLE_MODELS[lookup_key]["model_name"]
+        else:
+            display_name = model_id
+            
+        rec_models_by_api[api].append(display_name)
+    
+    if rec_models_by_api:
+        models_text = "📷 Доступные модели для распознавания изображений:\n\n"
+        for api, models in rec_models_by_api.items():
+            models_text += f"API: {api.upper()}\n"
+            models_text += "• " + "\n• ".join(models) + "\n\n"
+        
+        await message.answer(models_text)
 
     if is_admin(message.from_user.id):
         await message.answer(
@@ -385,7 +378,6 @@ async def cmd_generate_image(message: types.Message, state: FSMContext):
 
 @dp.message(Form.waiting_for_image_generation_prompt, F.photo)
 async def process_image_edit_prompt_handler(message: types.Message, state: FSMContext):
-    # Handle image for editing
     photo = message.photo[-1]
     file_id = photo.file_id
     file = await bot.get_file(file_id)
@@ -393,10 +385,8 @@ async def process_image_edit_prompt_handler(message: types.Message, state: FSMCo
     
     image_data = await bot.download_file(file_path)
     
-    # Store the image data in state
     await state.update_data(image_edit_data=image_data)
     
-    # Ask for editing instructions
     await message.reply("🖌️ Пожалуйста, опишите какие изменения нужно внести в изображение:")
     await state.set_state(Form.waiting_for_image_edit_instructions)
 
@@ -491,14 +481,12 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
             await message.reply("🔔Обработка файлов не поддерживается данной моделью.")
         return
 
-    # Обработка фотографий
     if message.photo:
         model_supported = False
         
         if api_type == "gemini":
             model_supported = True
         else:
-            # Создаем ключ в правильном формате для поиска в словаре
             lookup_key = f"{model_id}_{api_type}"
             if lookup_key in image_rec_models:
                 model_supported = True
@@ -526,7 +514,6 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
             await message.reply("🔔Распознавание изображений не поддерживается этой моделью.")
         return
 
-    # Обработка текстовых сообщенийc
     if current_state == Form.waiting_for_message:
         await handle_all_messages(message, state, is_admin, is_allowed)
     elif current_state == Form.waiting_for_image_and_prompt:
@@ -536,7 +523,6 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
             await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
     elif current_state == Form.waiting_for_image_and_prompt_openai:
         model_supported = False
-        # Создаем ключ в правильном формате для поиска в словаре
         lookup_key = f"{model_id}_{api_type}"
         if lookup_key in image_rec_models:
             model_supported = True
@@ -565,16 +551,12 @@ async def main():
         await init_enhance_prompt_client()
         
         print("Бот запущен и клиенты для всех пользователей инициализированы.")
-
-        try:
-            await dp.start_polling(bot, timeout=30, skip_updates=True)
-        except Exception as e:
-            logging.error(f"Ошибка polling-а: {e}", exc_info=True)
-
+        
+        await dp.start_polling(bot, skip_updates=True)
+        
     except Exception as e:
         print(f"Error during bot execution: {e}")
     finally:
-
         await shutdown()
         
 

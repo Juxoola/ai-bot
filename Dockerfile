@@ -1,32 +1,25 @@
 # Этап сборки (builder)
 FROM python:3.12-slim AS builder
 
-# Устанавливаем необходимые для сборки системные зависимости
 RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Копируем файл зависимостей
 COPY requirements.txt .
 
-# Обновляем pip и устанавливаем зависимости в отдельный префикс, чтобы потом их скопировать
 RUN pip install --upgrade pip && \
     pip install --prefix=/install --no-cache-dir -r requirements.txt
 
-# Финальный этап (final)
 FROM python:3.12-slim
 
-# Создаём директорию для базы данных и устанавливаем права доступа
 RUN mkdir -p /data && chmod 777 /data
 
 WORKDIR /app
 
-# Копируем установленные пакеты из builder-этапа
 COPY --from=builder /install /usr/local
 
-# Копируем весь исходный код проекта в контейнер
 COPY . .
 
 # Передаём дефолтные значения переменных окружения
