@@ -8,8 +8,8 @@ from database import load_context,save_context, is_admin,is_allowed, initialize_
 
 from keyboards import get_admin_keyboard, get_main_keyboard
 
-from func.gemini import handle_pdf, process_custom_image_prompt, handle_image
-from func.g4f import process_image_generation_prompt, handle_image_recognition, handle_files_or_urls, process_image_editing
+from func.gemini import handle_pdf, process_custom_image_prompt, handle_image, handle_document_with_conversion
+from func.g4f import process_image_generation_prompt, handle_image_recognition, handle_files_or_urls, process_image_editing, process_local_file
 
 from func.audio import handle_audio, process_whisper_model_selection
 from func.search import process_search_query
@@ -438,7 +438,6 @@ async def process_search_query_handler(message: types.Message, state: FSMContext
     await process_search_query(message, state)
 
 
-
 @dp.message(F.text == "📝 Длинное сообщение")
 @dp.message(F.text == "/long_message")
 async def cmd_long_message_handler(message: types.Message, state: FSMContext):
@@ -473,10 +472,7 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         if api_type in allowed_apis:
             await handle_files_or_urls(message, state)
         elif api_type == "gemini":
-            if message.document.mime_type == "application/pdf":
-                await handle_pdf(message, state)
-            else:
-                await message.reply("🔔Модель Gemini поддерживает только PDF. Пожалуйста, смените модель или отправьте PDF файл.")
+            await handle_document_with_conversion(message, state)
         else:
             await message.reply("🔔Обработка файлов не поддерживается данной моделью.")
         return

@@ -14,6 +14,11 @@ RUN pip install --upgrade pip && \
 
 FROM python:3.12-slim
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends antiword \
+    libreoffice-writer libmagic-dev && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /data && chmod 777 /data
 
 WORKDIR /app

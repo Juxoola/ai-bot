@@ -159,3 +159,7 @@ websockets
 Werkzeug
 wrapt
 yarl
+python-docx 
+openpyxl
+xlrd  
+olefile
