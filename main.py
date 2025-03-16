@@ -2,7 +2,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
+import os.path
+from g4f.cookies import set_cookies_dir, read_cookie_files
 from config import Form, bot, dp, init_enhance_prompt_client, update_image_client_for_recognition, openai_clients
 from database import load_context,save_context, is_admin,is_allowed, initialize_database, clear_all_user_contexts, initialize_models, rec_models, whisp_models, def_rec_model, def_gen_model, def_aspect, db_pool, def_enhance, init_all_user_clients, av_models, rec_models
 
@@ -14,7 +15,7 @@ from func.g4f import process_image_generation_prompt, handle_image_recognition, 
 from func.audio import handle_audio, process_whisper_model_selection
 from func.search import process_search_query
 from func.messages import handle_all_messages,cmd_long_message,handle_long_message
-from func.admin import cmd_add_user, cmd_add_model,cmd_add_image_gen_model,cmd_add_image_rec_model,cmd_delete_image_gen_model,cmd_delete_model,cmd_delete_image_rec_model,cmd_remove_user,process_add_user_id,process_remove_user_id,process_new_model_name,process_new_model_id,process_new_model_api,process_confirm_delete,process_delete_model_name,process_new_image_rec_model_id,process_new_image_rec_model_api,process_delete_image_rec_model_name,process_confirm_delete_image_rec_model,process_add_image_gen_model_name,process_delete_image_gen_model_name,process_confirm_delete_image_gen_model, cmd_send_to_all, cmd_send_to_user, process_message_to_all, process_user_id_to_send, process_message_to_user
+from func.admin import cmd_add_user, cmd_add_model,cmd_add_image_gen_model,cmd_add_image_rec_model,cmd_delete_image_gen_model,cmd_delete_model,cmd_delete_image_rec_model,cmd_remove_user,process_add_user_id,process_remove_user_id,process_new_model_name,process_new_model_id,process_new_model_api,process_confirm_delete,process_delete_model_name,process_new_image_rec_model_id,process_new_image_rec_model_api,process_delete_image_rec_model_name,process_confirm_delete_image_rec_model,process_new_image_gen_model_api,process_new_image_gen_model_id, process_delete_image_gen_model_name,process_confirm_delete_image_gen_model, cmd_send_to_all, cmd_send_to_user, process_message_to_all, process_user_id_to_send, process_message_to_user
 
 
 from settings import cmd_settings, select_model_handler, select_image_gen_model_handler, select_image_rec_model_handler, select_aspect_ratio_handler, process_enhance_selection_handler, close_settings_handler, model_selection_handler, process_image_generation_model_handler, process_image_recognition_model_selection_handler, process_aspect_ratio_selection_handler, toggle_web_search_handler, toggle_processing_time_handler
@@ -124,9 +125,7 @@ async def cmd_add_image_gen_model_handler(message: types.Message, state: FSMCont
 async def cmd_delete_image_gen_model_handler(message: types.Message, state: FSMContext):
     await cmd_delete_image_gen_model(message, state)
 
-@dp.message(Form.waiting_for_add_image_gen_model_name)
-async def process_add_image_gen_model_name_handler(message: types.Message, state: FSMContext):
-    await process_add_image_gen_model_name(message, state)
+
 
 @dp.callback_query(Form.waiting_for_delete_image_gen_model_name)
 async def process_delete_image_gen_model_name_handler(callback_query: types.CallbackQuery, state: FSMContext):
@@ -146,12 +145,18 @@ async def process_new_image_rec_model_api_handler(message: types.Message, state:
 
 @dp.message(Form.waiting_for_image_edit_instructions)
 async def process_image_edit_instructions_handler(message: types.Message, state: FSMContext):
-    # Get the edit instructions
     instructions = message.text
     await state.update_data(image_edit_instructions=instructions)
     
-    # Process the image editing
     await process_image_editing(message, state)
+
+@dp.message(Form.waiting_for_new_image_gen_model_id)
+async def process_new_image_gen_model_id_handler(message: types.Message, state: FSMContext):
+    await process_new_image_gen_model_id(message, state)
+
+@dp.message(Form.waiting_for_new_image_gen_model_api)
+async def process_new_image_gen_model_api_handler(message: types.Message, state: FSMContext):
+    await process_new_image_gen_model_api(message, state)
 
 otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
 
@@ -324,44 +329,24 @@ async def cmd_clear_context(message: types.Message, state: FSMContext):
         return
 
     user_id = message.from_user.id
-
     user_context = await load_context(user_id)
-
-    DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
-    DEFAULT_IMAGE_RECOGNITION_MODEL = await def_rec_model()
-    DEFAULT_ASPECT_RATIO = await def_aspect()
-    DEFAULT_ENHANCE = await def_enhance()
-
-    model_key = user_context["model"] 
-    current_api_type = user_context["api_type"]
-    current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
-    current_image_rec_model = user_context.get("image_recognition_model", DEFAULT_IMAGE_RECOGNITION_MODEL)
-    current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
-    current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-    current_web_search = user_context.get("web_search_enabled", False)
-
-    if current_api_type == "gemini":
-        user_context["messages"] = []
-    elif current_api_type == "g4f":
-        user_context["messages"] = [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]
-    else:
-        user_context["messages"] = [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]
-
-
-    user_context.update({
-        "model": model_key,
-        "api_type": current_api_type,
+    api_type = user_context["api_type"]
+    new_context = {
+        "model": user_context["model"],
+        "api_type": api_type,
         "g4f_image": None,
         "g4f_image_base64": None,
         "long_message": "",
-        "image_generation_model": current_image_gen_model,
-        "image_recognition_model": current_image_rec_model,
-        "aspect_ratio": current_aspect_ratio,
-        "enhance": current_enhance,
-        "web_search_enabled": current_web_search
-    })
+        "web_search_enabled": user_context.get("web_search_enabled", False),
+        "image_generation_model": user_context.get("image_generation_model", await def_gen_model()),
+        "image_recognition_model": user_context.get("image_recognition_model", await def_rec_model()),
+        "aspect_ratio": user_context.get("aspect_ratio", await def_aspect()),
+        "enhance": user_context.get("enhance", await def_enhance()),
+        "show_processing_time": user_context.get("show_processing_time", True),
+        "messages": [] if api_type == "gemini" else [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]
+    }
 
-    await save_context(user_id, user_context)
+    await save_context(user_id, new_context)
     await message.reply("Контекст очищен.")
 
 
@@ -445,7 +430,7 @@ async def cmd_long_message_handler(message: types.Message, state: FSMContext):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
     
-    await cmd_long_message(message, state, is_allowed)
+    await cmd_long_message(message, state, is_allowed, is_admin)
 
 @dp.message(Form.waiting_for_long_message)
 async def handle_long_message_handler(message: types.Message, state: FSMContext):
@@ -454,7 +439,9 @@ async def handle_long_message_handler(message: types.Message, state: FSMContext)
 
 @dp.message()
 async def handle_all_messages_handler(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
+    user_id = message.from_user.id
+    
+    if not is_allowed(user_id):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
 
@@ -466,6 +453,7 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
 
     model_key = user_context["model"]
     model_id, api_type = model_key.split('_')
+    
     image_rec_models = await rec_models()
     allowed_apis = list(openai_clients.keys()) + ["g4f"]
     if message.document:
@@ -489,7 +477,7 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         
         if model_supported:
             if api_type == "g4f":
-                await update_image_client_for_recognition(message.from_user.id, model_id)
+                await update_image_client_for_recognition(user_id, model_id)
                 await state.set_state(Form.waiting_for_custom_image_recognition_prompt)
                 await handle_image_recognition(message, state)
             elif api_type == "gemini":
@@ -546,6 +534,9 @@ async def main():
         await init_all_user_clients()
         await init_enhance_prompt_client()
         
+        cookies_dir = os.path.join(os.path.dirname(__file__), "har_and_cookies")
+        set_cookies_dir(cookies_dir)
+        read_cookie_files(cookies_dir)
         print("Бот запущен и клиенты для всех пользователей инициализированы.")
         
         await dp.start_polling(bot, skip_updates=True)

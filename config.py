@@ -66,6 +66,8 @@ class Form(StatesGroup):
     waiting_for_new_image_rec_model_id = State()
     waiting_for_new_image_rec_model_api = State()
     waiting_for_image_edit_instructions = State()
+    waiting_for_new_image_gen_model_id = State()
+    waiting_for_new_image_gen_model_api = State()
 
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)

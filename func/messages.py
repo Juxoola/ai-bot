@@ -3,7 +3,7 @@ from config import Form, get_client, get_openai_client, openai_clients
 import tempfile
 import os
 from datetime import timedelta
-from database import load_context,save_context, av_models
+from database import load_context,save_context, av_models, trim_context
 from aiogram import types
 import asyncio
 import logging
@@ -18,73 +18,60 @@ import re
 MARKDOWN_SYMBOLS = ['**', '__', '*', '_', '```', '`']
 
 async def split_markdown(text, max_length):
-
+    if len(text) <= max_length:
+        return [text]
+        
     parts = []
     current_part = ""
-    last_code_block_lang = None  
     in_code_block = False
-
+    code_block_lang = None
+    
     lines = text.splitlines(keepends=True)
-
+    
     for line in lines:
-        is_code_block_line = line.strip().startswith('```')
-
-        if is_code_block_line:
-            lang_match = re.match(r'```(\w+)', line.strip())
-            current_code_block_lang = lang_match.group(1) if lang_match else None
-
+        is_code_block_marker = line.strip().startswith('```')
+        
+        if is_code_block_marker:
             if not in_code_block:
-                # Начало блока кода
-                if len(current_part) + len(line) > max_length and current_part:
-                    parts.append(current_part)
-                    current_part = line
-                    if current_code_block_lang:
-                        last_code_block_lang = current_code_block_lang 
-                    else:
-                        last_code_block_lang = None
-                else:
-                    current_part += line
-                    if current_code_block_lang:
-                        last_code_block_lang = current_code_block_lang 
-                    else:
-                        last_code_block_lang = None
+                lang_match = re.match(r'```(\w+)', line.strip())
+                code_block_lang = lang_match.group(1) if lang_match else None
                 in_code_block = True
-
-            else:
-                if len(current_part) + len(line) > max_length and current_part:
+                
+                if len(current_part) + len(line) > max_length:
                     parts.append(current_part)
                     current_part = line
                 else:
                     current_part += line
-                parts.append(current_part)
-                current_part = ""
+            else:
                 in_code_block = False
-                last_code_block_lang = None 
-
-
+                
+                current_part += line
+                
+                if current_part:
+                    parts.append(current_part)
+                    current_part = ""
         elif in_code_block:
             if len(current_part) + len(line) > max_length:
                 parts.append(current_part)
-
-                if last_code_block_lang:
-                    current_part = f'```{last_code_block_lang}\n' + line
-                else:
-                    current_part = '```\n' + line 
-
+                current_part = f"```{code_block_lang or ''}\n{line}"
             else:
                 current_part += line
-
         else:
-            if len(current_part) + len(line) > max_length and current_part:
-                parts.append(current_part)
-                current_part = ""
-                current_part += line
+            if len(current_part) + len(line) > max_length:
+                if current_part:
+                    parts.append(current_part)
+                current_part = line
             else:
                 current_part += line
-
+                
     if current_part:
         parts.append(current_part)
-
+        
+    for i in range(len(parts)):
+        open_count = parts[i].count("```") 
+        if open_count % 2 != 0: 
+            parts[i] += "\n```"
+            
     return parts
 
 async def fix_markdown(text):
@@ -204,17 +191,50 @@ async def convert_dashed_code_blocks_to_markdown(text):
     return result
 
 MAX_MESSAGE_LENGTH = 4050
+
+class RateLimiter:
+    def __init__(self, rate_limit=5, per_seconds=60):
+        self.rate_limit = rate_limit
+        self.per_seconds = per_seconds
+        self.user_requests = {}
+        self.lock = asyncio.Lock()
+    
+    async def can_process(self, user_id):
+        async with self.lock:
+            current_time = time.time()
+            if user_id not in self.user_requests:
+                self.user_requests[user_id] = []
+            
+            self.user_requests[user_id] = [
+                ts for ts in self.user_requests[user_id] 
+                if current_time - ts < self.per_seconds
+            ]
+            
+            if len(self.user_requests[user_id]) >= self.rate_limit:
+                return False
+                
+            self.user_requests[user_id].append(current_time)
+            return True
+
 async def handle_all_messages(message: types.Message, state: FSMContext, is_admin, is_allowed):
     user_id = message.from_user.id
     
-
+    if not is_admin:
+        rate_limiter = RateLimiter(rate_limit=5, per_seconds=60)
+        can_process = await rate_limiter.can_process(user_id)
+        if not can_process:
+            await message.reply("⚠️ Слишком много запросов. Пожалуйста, подождите")
+            return
+    
     start_time = time.time()
     current_time = time.strftime("%H:%M:%S", time.localtime())
    
-
     user_context = await load_context(user_id)  
     model_key = user_context["model"]  
     model_id, api_type = model_key.split('_')
+
+    user_is_admin = is_admin(user_id)
+    user_context["messages"] = await trim_context(user_context["messages"], is_admin=user_is_admin)
 
     current_state = await state.get_state()
     if (
@@ -502,7 +522,15 @@ async def handle_all_messages(message: types.Message, state: FSMContext, is_admi
 
 
 
-async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed):
+async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed, is_admin):
+
+    if not is_admin:
+        rate_limiter = RateLimiter(rate_limit=5, per_seconds=60)
+        can_process = await rate_limiter.can_process(user_id)
+        if not can_process:
+            await message.reply("⚠️ Слишком много запросов. Пожалуйста, подождите")
+            return
+        
     start_time = time.time()
     current_time = time.strftime("%H:%M:%S", time.localtime())
 
@@ -513,6 +541,9 @@ async def cmd_long_message(message: types.Message, state: FSMContext, is_allowed
     model_key = user_context["model"]  
     model_id, api_type = model_key.split('_')
     
+    user_is_admin = is_admin(user_id)
+    user_context["messages"] = await trim_context(user_context["messages"], is_admin=user_is_admin)
+
     if current_state == Form.waiting_for_long_message:
 
         if user_context["long_message"]:

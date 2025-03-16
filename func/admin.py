@@ -330,19 +330,48 @@ async def cmd_add_image_gen_model(message: types.Message, state: FSMContext):
         await message.reply("Извините, у вас нет прав для выполнения этого действия.")
         return
 
-    await message.reply("Введите имя новой модели для генерации изображений:")
-    await state.set_state(Form.waiting_for_add_image_gen_model_name)
+    await message.reply("Введите ID модели для генерации изображений:")
+    await state.set_state(Form.waiting_for_new_image_gen_model_id)
 
-async def process_add_image_gen_model_name(message: types.Message, state: FSMContext):
-    model_name = message.text
+async def process_new_image_gen_model_id(message: types.Message, state: FSMContext):
+    model_id = message.text
+    await state.update_data(new_image_gen_model_id=model_id)
+    allowed_apis = list(openai_clients.keys()) + ["gemini", "g4f"]
+    available = ", ".join(allowed_apis)
+    await message.reply(f"Введите тип API для модели генерации изображений {available}")
+    await state.set_state(Form.waiting_for_new_image_gen_model_api)
 
+async def process_new_image_gen_model_api(message: types.Message, state: FSMContext):
+    model_api = message.text.lower() 
+    
+    allowed_apis = list(openai_clients.keys()) + ["gemini", "g4f"]
+
+    if model_api not in allowed_apis:
+        available = ", ".join(allowed_apis)
+        await message.reply(f"Неверный тип API. Пожалуйста, используйте команду /add_image_gen_model снова и введите {available}")
+        await state.set_state(Form.waiting_for_message)
+        return
+    
+    data = await state.get_data()
+    model_id = data.get("new_image_gen_model_id")
+    
     async with aiosqlite.connect(DATABASE_FILE) as db:
-        await db.execute("INSERT INTO image_generation_models (name) VALUES (?)", (model_name,))
+        async with db.execute("SELECT 1 FROM image_generation_models WHERE model_id = ? AND api = ?", 
+                            (model_id, model_api)) as cursor:
+            if await cursor.fetchone() is not None:
+                await message.reply(f"Модель с ID {model_id} и API {model_api} уже существует. Пожалуйста, используйте другие параметры.")
+                await state.set_state(Form.waiting_for_message)
+                return
+        
+        await db.execute(
+            "INSERT INTO image_generation_models (model_id, api) VALUES (?, ?)",
+            (model_id, model_api)
+        )
         await db.commit()
-
+    
     await init_gen_models()
-
-    await message.reply(f"Модель {model_name} успешно добавлена для генерации изображений!")
+    
+    await message.reply(f"Модель {model_id} с API {model_api} успешно добавлена для генерации изображений!")
     await state.set_state(Form.waiting_for_message)
 
 async def cmd_delete_image_gen_model(message: types.Message, state: FSMContext):
@@ -360,7 +389,7 @@ async def cmd_delete_image_gen_model(message: types.Message, state: FSMContext):
     await state.set_state(Form.waiting_for_delete_image_gen_model_name)
 
 async def process_delete_image_gen_model_name(callback_query: types.CallbackQuery, state: FSMContext):
-    model_name = callback_query.data.split('_', 2)[2] if callback_query.data.startswith('gen_model_') else callback_query.data
+    model_data = callback_query.data.split('_', 2)[2] if callback_query.data.startswith('gen_model_') else callback_query.data
 
     data = await state.get_data()
     delete_image_gen_model_message_id = data.get("delete_image_gen_model_message_id")
@@ -370,20 +399,19 @@ async def process_delete_image_gen_model_name(callback_query: types.CallbackQuer
         except Exception as e:
             logging.error(f"Ошибка при удалении сообщения выбора модели для удаления: {e}")
 
-    if model_name == "cancel_delete_image_gen":
+    if model_data == "cancel_delete_image_gen":
         await bot.send_message(callback_query.from_user.id, "Удаление модели для генерации изображений отменено.")
         await state.set_state(Form.waiting_for_message)
         return
 
-    IMAGE_GENERATION_MODELS = await gen_models()
-    if model_name not in IMAGE_GENERATION_MODELS:
-        await bot.send_message(callback_query.from_user.id, "Модель не найдена.")
-        await state.set_state(Form.waiting_for_message)
-        return
+    # Split model string into model_id and api
+    parts = model_data.split("_", 1)
+    model_id = parts[0]
+    api = parts[1] if len(parts) > 1 else ""
 
-    await state.update_data(delete_image_gen_model_name=model_name)
+    await state.update_data(delete_image_gen_model_id=model_id, delete_image_gen_model_api=api)
     await bot.send_message(callback_query.from_user.id,
-                         f"Вы уверены, что хотите удалить модель '{model_name}' для генерации изображений? (да/нет)",
+                         f"Вы уверены, что хотите удалить модель '{model_id}' (API: {api}) для генерации изображений? (да/нет)",
                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                              [InlineKeyboardButton(text="Да", callback_data="confirm_delete_image_gen_yes"),  
                               InlineKeyboardButton(text="Нет", callback_data="confirm_delete_image_gen_no")]  
@@ -395,20 +423,22 @@ async def process_confirm_delete_image_gen_model(
 ):
     confirmation = callback_query.data.split("_", 4)[4]
     data = await state.get_data()
-    model_name = data.get("delete_image_gen_model_name")
+    model_id = data.get("delete_image_gen_model_id")
+    model_api = data.get("delete_image_gen_model_api")
 
     await bot.answer_callback_query(callback_query.id)
 
     if confirmation == "yes":
         async with aiosqlite.connect(DATABASE_FILE) as db:
-            await db.execute("DELETE FROM image_generation_models WHERE name = ?", (model_name,))
+            await db.execute("DELETE FROM image_generation_models WHERE model_id = ? AND api = ?", 
+                            (model_id, model_api))
             await db.commit()
 
         await init_gen_models()
 
         await bot.send_message(
             callback_query.from_user.id,
-            f"Модель '{model_name}' успешно удалена для генерации изображений!",
+            f"Модель '{model_id}' (API: {model_api}) успешно удалена для генерации изображений!",
         )
     else:
         await bot.send_message(

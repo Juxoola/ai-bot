@@ -8,6 +8,10 @@ from collections import deque
 from contextlib import asynccontextmanager
 import os
 from config import openai_clients
+import time
+from cachetools import TTLCache, LRUCache
+import logging
+
 AVAILABLE_MODELS = None
 IMAGE_GENERATION_MODELS = None
 IMAGE_RECOGNITION_MODELS = None
@@ -39,12 +43,12 @@ DEFAULT_MODELS = [
     {"model_id": "sonar-pro", "model_name": "Sonar-pro-perplexity", "api": "g4f"},
     {"model_id": "sonar-reasoning", "model_name": "Sonar-reasoning-perplexity", "api": "g4f"},
     {"model_id": "o3-mini-low", "model_name": "o3-mini-low", "api": "g4f"},
-    {"model_id": "openai", "model_name": "GPT-4o-mini","api": "glhf"},
-    {"model_id": "openai-large", "model_name": "GPT-4o","api": "glhf"},
-    {"model_id": "searchgpt", "model_name": "SearchGPT","api": "glhf"},
-    {"model_id": "deepseek", "model_name": "DeepSeek-V3","api": "glhf"},
-    {"model_id": "deepseek-r1", "model_name": "Deepseek-r1","api": "glhf"},
-    {"model_id": "deepseek-r1", "model_name": "Deepseek-r1","api": "ddc"},
+    {"model_id": "openai", "model_name": "GPT-4o-mini","api": "poli"},
+    {"model_id": "openai-large", "model_name": "GPT-4o","api": "poli"},
+    {"model_id": "searchgpt", "model_name": "SearchGPT","api": "poli"},
+    {"model_id": "deepseek", "model_name": "DeepSeek-V3","api": "poli"},
+    {"model_id": "deepseek-r1", "model_name": "Deepseek-r1","api": "poli"},
+    {"model_id": "deepseek-r1", "model_name": "Deepseek-r1","api": "poli"},
     {"model_id": "google/gemini-2.0-pro-exp-02-05:free", "model_name": "Gemini-2.0-pro-exp-02-05","api": "openrouter"},
     {"model_id": "google/gemini-2.0-flash-thinking-exp:free", "model_name": "Gemini-2.0-flash-thinking-exp","api": "openrouter"},
     {"model_id": "deepseek/deepseek-r1-distill-llama-70b:free", "model_name": "DeepSeek-R1-Distill-70B", "api": "openrouter"},
@@ -57,12 +61,13 @@ DEFAULT_MODELS = [
     {"model_id": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", "model_name": "DeepSeek-R1-Distill-32B","api":"ddc"},
     {"model_id": "deepseek-v3", "model_name": "DeepSeek-V3", "api": "ddc"},
     {"model_id": "gpt-4o", "model_name": "GPT-4o", "api": "ddc"}
-
-
-
 ]
 
-DEFAULT_IMAGE_GEN_MODELS = ["flux", "turbo", "flux-schnell", "flux-dev", "sd-3.5", "sdxl-turbo" ]
+DEFAULT_IMAGE_GEN_MODELS = [
+    {"model_id": "flux", "api": "poli"},
+    {"model_id": "turbo", "api": "poli"},
+
+]
 
 DEFAULT_IMAGE_RECOGNITION_MODELS = [
     {"model_id": "blackboxai", "api": "g4f"},
@@ -88,62 +93,91 @@ DEFAULT_WHISPER_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
 DEFAULT_MODEL = "gpt-4o"
-DEFAULT_IMAGE_GEN_MODEL = "flux"
+DEFAULT_IMAGE_GEN_MODEL = "flux_poli"
 DEFAULT_IMAGE_RECOGNITION_MODEL = "gpt-4o"
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
 DEFAULT_ASPECT_RATIO = "1:1"
 DEFAULT_ENHANCE = True
 
+user_context_cache = TTLCache(maxsize=2000, ttl=300)  # 5 минут
+
 class DatabaseConnectionPool:
-    def __init__(self, max_connections=5):
+    def __init__(self, max_connections=20):
         self.max_connections = max_connections
         self.pool = deque(maxlen=max_connections)
         self.lock = asyncio.Lock()
         self.in_use = set()
+        self.connection_timeouts = {}
+        self.connection_stats = {"total_created": 0, "current_active": 0, "max_concurrent": 0}
 
     async def acquire(self):
         async with self.lock:
+            current_time = time.time()
+            for conn in list(self.in_use):
+                if current_time - self.connection_timeouts.get(conn, 0) > 30:
+                    try:
+                        self.in_use.remove(conn)
+                        self.connection_stats["current_active"] -= 1
+                        await conn.close()
+                    except Exception:
+                        pass
+            
             while True:
                 if self.pool:
                     conn = self.pool.popleft()
                     self.in_use.add(conn)
+                    self.connection_stats["current_active"] += 1
+                    self.connection_stats["max_concurrent"] = max(
+                        self.connection_stats["max_concurrent"], 
+                        self.connection_stats["current_active"]
+                    )
+                    self.connection_timeouts[conn] = time.time()
                     return conn
                 
                 if len(self.in_use) < self.max_connections:
                     conn = await aiosqlite.connect(DATABASE_FILE)
                     await conn.execute("PRAGMA journal_mode=WAL")
                     await conn.execute("PRAGMA synchronous=NORMAL")
-                    await conn.execute("PRAGMA cache_size=-2000")
+                    await conn.execute("PRAGMA cache_size=-4000")
                     await conn.execute("PRAGMA temp_store=MEMORY")
                     await conn.execute("PRAGMA mmap_size=30000000000")
+                    await conn.execute("PRAGMA busy_timeout=5000")
                     self.in_use.add(conn)
+                    self.connection_stats["total_created"] += 1
+                    self.connection_stats["current_active"] += 1
+                    self.connection_stats["max_concurrent"] = max(
+                        self.connection_stats["max_concurrent"], 
+                        self.connection_stats["current_active"]
+                    )
+                    self.connection_timeouts[conn] = time.time()
                     return conn
                 
                 await asyncio.sleep(0.1)
 
     async def release(self, conn):
         async with self.lock:
-            self.in_use.remove(conn)
-            self.pool.append(conn)
-
-    async def close_all(self):
+            if conn in self.in_use:
+                self.in_use.remove(conn)
+                self.connection_stats["current_active"] -= 1
+                self.pool.append(conn)
+            
+    async def get_stats(self):
         async with self.lock:
-            for conn in self.pool:
-                await conn.close()
-            for conn in self.in_use:
-                await conn.close()
-            self.pool.clear()
-            self.in_use.clear()
+            return self.connection_stats.copy()
 
-db_pool = DatabaseConnectionPool(max_connections=5)
+db_pool = DatabaseConnectionPool(max_connections=20)
+
+#семафор для ограничения одновременного доступа к базе данных
+db_semaphore = asyncio.Semaphore(20)
 
 @asynccontextmanager
 async def get_db_connection():
-    conn = await db_pool.acquire()
-    try:
-        yield conn
-    finally:
-        await db_pool.release(conn)
+    async with db_semaphore:
+        conn = await db_pool.acquire()
+        try:
+            yield conn
+        finally:
+            await db_pool.release(conn)
 
 async def optimize_database():
 
@@ -202,7 +236,9 @@ async def initialize_database():
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS image_generation_models (
-                name TEXT PRIMARY KEY
+                model_id TEXT,
+                api TEXT,
+                PRIMARY KEY (model_id, api)
             )
             """
         )
@@ -242,19 +278,6 @@ async def initialize_database():
         async with db.execute("PRAGMA table_info(user_contexts)") as cursor:
             columns = [row[1] for row in await cursor.fetchall()]
 
-        if "image_generation_model" not in columns:
-            await db.execute("ALTER TABLE user_contexts ADD COLUMN image_generation_model TEXT")
-            print("Added column image_generation_model to user_contexts")
-        if "aspect_ratio" not in columns:
-            await db.execute("ALTER TABLE user_contexts ADD COLUMN aspect_ratio TEXT")
-            print("Added column aspect_ratio to user_contexts")
-        if "enhance" not in columns:
-            await db.execute("ALTER TABLE user_contexts ADD COLUMN enhance INTEGER")
-            print("Added column enhance to user_contexts")
-        
-        if "show_processing_time" not in columns:
-            await db.execute("ALTER TABLE user_contexts ADD COLUMN show_processing_time INTEGER")
-            print("Added column show_processing_time to user_contexts")
 
         await db.commit()
 
@@ -299,13 +322,15 @@ async def initialize_database():
                 } for model in DEFAULT_MODELS
             }
 
-        async with db.execute("SELECT name FROM image_generation_models") as cursor:
+        async with db.execute("SELECT model_id, api FROM image_generation_models") as cursor:
             rows = await cursor.fetchall()
-            loaded_image_gen_models = [row[0] for row in rows]
+            loaded_image_gen_models = [{"model_id": row[0], "api": row[1]} for row in rows]
 
         if not loaded_image_gen_models:
-            await db.executemany("INSERT INTO image_generation_models (name) VALUES (?)",
-                                 [(model_name,) for model_name in DEFAULT_IMAGE_GEN_MODELS])
+            await db.executemany(
+                "INSERT INTO image_generation_models (model_id, api) VALUES (?, ?)",
+                [(model["model_id"], model["api"]) for model in DEFAULT_IMAGE_GEN_MODELS]
+            )
             await db.commit()
             loaded_image_gen_models = DEFAULT_IMAGE_GEN_MODELS
 
@@ -356,7 +381,6 @@ async def clear_all_user_contexts():
             UPDATE user_contexts
             SET messages = CASE
                 WHEN api_type = 'gemini' THEN '[]'
-                WHEN api_type = 'g4f' THEN '[{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]'
                 ELSE '[{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]'
             END,
             long_message = '',
@@ -366,6 +390,10 @@ async def clear_all_user_contexts():
         await db.commit()
         
 async def load_context(user_id):
+    cache_key = f"context_{user_id}"
+    if cache_key in user_context_cache:
+        return user_context_cache[cache_key]
+    
     async with get_db_connection() as db:
         async with db.execute(
             "SELECT model, messages, api_type, g4f_image_base64, long_message, web_search_enabled, image_generation_model, aspect_ratio, enhance, show_processing_time FROM user_contexts WHERE user_id = ?",
@@ -386,6 +414,7 @@ async def load_context(user_id):
                     "show_processing_time": bool(row[9])
 
                 }
+                user_context_cache[cache_key] = context
                 return context
             else:
                 allowed_apis = list(openai_clients.keys()) + ["g4f"]
@@ -413,39 +442,57 @@ async def load_context(user_id):
                     from config import update_user_clients, update_image_gen_client
                     model_key = context["model"].split('_')[0]
                     update_user_clients(user_id, model_key)
-                    update_image_gen_client(user_id, context["image_generation_model"])
                     
+                    image_gen_model_id = context["image_generation_model"].split('_')[0]
+                    update_image_gen_client(user_id, image_gen_model_id)
+                    
+                user_context_cache[cache_key] = context
                 return context
 
 async def save_context(user_id, context):
+    cache_key = f"context_{user_id}"
+    if cache_key in user_context_cache:
+        del user_context_cache[cache_key]
+    
     async with get_db_connection() as db:
         async with db.cursor() as cursor:
-            await cursor.execute("BEGIN")
+            await cursor.execute("BEGIN IMMEDIATE")
             try:
                 context_to_save = context.copy()
                 model_id = context_to_save["model"].split('_')[0]
                 
-                if context_to_save["g4f_image"]:
-                    context_to_save["g4f_image_base64"] = base64.b64encode(
-                        context_to_save["g4f_image"].getvalue()
-                    ).decode("utf-8")
-                else:
-                    context_to_save["g4f_image_base64"] = None
-
                 if "g4f_image" in context_to_save:
+                    if context_to_save["g4f_image"]:
+                        context_to_save["g4f_image_base64"] = base64.b64encode(
+                            context_to_save["g4f_image"].getvalue()
+                        ).decode("utf-8")
+                    else:
+                        context_to_save["g4f_image_base64"] = None
+                    
                     del context_to_save["g4f_image"]
 
+                if "image_generation_model" in context_to_save:
+                    if isinstance(context_to_save["image_generation_model"], dict):
+                        img_model_id = context_to_save["image_generation_model"]["model_id"]
+                        img_api = context_to_save["image_generation_model"]["api"]
+                        context_to_save["image_generation_model"] = f"{img_model_id}_{img_api}"
+
+                messages_json = json.dumps(context_to_save["messages"], 
+                                          ensure_ascii=False, 
+                                          separators=(',', ':')) 
+
                 await cursor.execute(
-                      """
+                    """
                     REPLACE INTO user_contexts (
                         user_id, model, messages, api_type, g4f_image_base64,
-                        long_message, web_search_enabled, image_generation_model, aspect_ratio, enhance, show_processing_time
+                        long_message, web_search_enabled, image_generation_model, 
+                        aspect_ratio, enhance, show_processing_time
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
                         model_id, 
-                        json.dumps(context_to_save["messages"], ensure_ascii=False),
+                        messages_json,
                         context_to_save["api_type"],
                         context_to_save["g4f_image_base64"],
                         context_to_save["long_message"],
@@ -454,12 +501,20 @@ async def save_context(user_id, context):
                         context_to_save["aspect_ratio"],
                         int(context_to_save["enhance"]),
                         int(context_to_save.get("show_processing_time", True))
-
                     ),
                 )
                 await db.commit()
+                
+                updated_context = context.copy()
+                if "g4f_image" in updated_context and updated_context["g4f_image"]:
+                    updated_context["g4f_image"] = BytesIO(
+                        base64.b64decode(context_to_save["g4f_image_base64"])
+                    )
+                user_context_cache[cache_key] = updated_context
+                
             except Exception as e:
                 await db.rollback()
+                logging.error(f"Error saving context for user {user_id}: {e}")
                 raise e
 
 async def load_models():
@@ -485,13 +540,13 @@ async def load_image_generation_models():
     try:
         async with get_db_connection() as db:
             models = []
-            async with db.execute("SELECT name FROM image_generation_models") as cursor:
+            async with db.execute("SELECT model_id, api FROM image_generation_models") as cursor:
                 async for row in cursor:
-                    models.append(row[0])
+                    models.append({"model_id": row[0], "api": row[1]})
             return models
     except Exception as e:
         print(f"Error loading image generation models: {e}")
-        return DEFAULT_IMAGE_GEN_MODELS 
+        return DEFAULT_IMAGE_GEN_MODELS
 
 async def load_image_recognition_models():
     try:
@@ -542,14 +597,18 @@ async def save_image_generation_models(models):
             await cursor.execute("BEGIN")
             try:
                 await cursor.execute("DELETE FROM image_generation_models")
+                insert_data = [
+                    (model["model_id"], model["api"])
+                    for model in models
+                ]
                 await cursor.executemany(
-                    "INSERT INTO image_generation_models (name) VALUES (?)",
-                    [(model_name,) for model_name in models],
+                    "INSERT INTO image_generation_models (model_id, api) VALUES (?, ?)",
+                    insert_data
                 )
                 await db.commit()
             except Exception as e:
                 await db.rollback()
-                print(f"Error saving image generation models: {e}")
+                raise e
 
 async def save_image_recognition_models(models):
     async with get_db_connection() as db:
@@ -673,25 +732,50 @@ async def get_all_allowed_users():
         
 
 async def init_all_user_clients():
+    try:
+        from config import update_user_clients, update_image_gen_client
+        from database import def_gen_model
+        DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
 
-    from config import update_user_clients, update_image_gen_client
-    from database import def_gen_model
-    DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
+        async with get_db_connection() as db:
+            async with db.execute("SELECT user_id, model, api_type, image_generation_model FROM user_contexts") as cursor:
+                rows = await cursor.fetchall()
 
-    async with get_db_connection() as db:
-        async with db.execute("SELECT user_id, model, api_type, image_generation_model FROM user_contexts") as cursor:
-            rows = await cursor.fetchall()
+        # Инициализируем клиентов группами по 10 для предотвращения перегрузки
+        batch_size = 10
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i:i+batch_size]
+            tasks = []
+            
+            for user_id, model, api_type, image_gen_model in batch:
+                if api_type == "g4f":
+                    try:
+                        model_key = model.split('_')[0]
+                        tasks.append(asyncio.to_thread(update_user_clients, user_id, model_key))
+                        
+                        if image_gen_model:
+                            image_gen_model_id = image_gen_model.split('_')[0]
+                            tasks.append(asyncio.to_thread(update_image_gen_client, user_id, image_gen_model_id))
+                        else:
+                            default_image_gen_model_id = DEFAULT_IMAGE_GEN_MODEL.split('_')[0]
+                            tasks.append(asyncio.to_thread(update_image_gen_client, user_id, default_image_gen_model_id))
+                    except Exception as e:
+                        logging.error(f"Ошибка при создании задачи для пользователя {user_id}: {e}")
+            
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await asyncio.sleep(0.5)
+                
+    except Exception as e:
+        logging.error(f"Глобальная ошибка в init_all_user_clients: {e}")
 
-    import asyncio
-    tasks = []
-    for user_id, model, api_type, image_gen_model in rows:
-        if api_type == "g4f":
-            model_key = model.split('_')[0]
-            tasks.append(asyncio.to_thread(update_user_clients, user_id, model_key))
-            if image_gen_model:
-                tasks.append(asyncio.to_thread(update_image_gen_client, user_id, image_gen_model))
-            else:
-                tasks.append(asyncio.to_thread(update_image_gen_client, user_id, DEFAULT_IMAGE_GEN_MODEL))
-    if tasks:
-        await asyncio.gather(*tasks)
+async def trim_context(messages, is_admin=False, max_messages=10):
+    
+    if is_admin:
+        return messages
+    
+    if len(messages) <= max_messages:
+        return messages
+    
+    return [messages[0]] + messages[-(max_messages-1):]
 

@@ -1,3 +1,4 @@
+import os
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 async def get_admin_keyboard():
@@ -55,7 +56,8 @@ async def get_main_keyboard(include_admin_button=False):
 async def get_model_selection_keyboard(available_models):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
 
-    priority_api_order = ["gemini", "g4f", "glhf", "openrouter" ]
+    priority_api_order_str = os.environ.get("PRIORITY_API_ORDER", "gemini,g4f,glhf,openrouter")
+    priority_api_order = [api.strip() for api in priority_api_order_str.split(",")]
     
     grouped_models = {}
     for model_id, model_data in available_models.items():
@@ -109,14 +111,20 @@ async def get_image_gen_model_selection_keyboard(IMAGE_GENERATION_MODELS):
         [InlineKeyboardButton(text=f"----- Модели для генерации изображений -----", callback_data="ignore")]
     )
     buttons_row = []
-    for model_name in IMAGE_GENERATION_MODELS:
-        button = InlineKeyboardButton(text=model_name, callback_data=f"gen_model_{model_name}")
+    
+    for model in IMAGE_GENERATION_MODELS:
+        model_id = model["model_id"]
+        api = model["api"]
+        display_text = f"{model_id} ({api})"
+        button = InlineKeyboardButton(text=display_text, callback_data=f"gen_model_{model_id}_{api}")
         buttons_row.append(button)
         if len(buttons_row) == 2:
             keyboard.inline_keyboard.append(buttons_row)
             buttons_row = []
+    
     if buttons_row:
         keyboard.inline_keyboard.append(buttons_row)
+    
     return keyboard
 
 async def get_image_recognition_model_selection_keyboard(IMAGE_RECOGNITION_MODELS):

@@ -23,6 +23,7 @@ services:
       PROVIDER_IMAGE_RECOGNITION_MODELS: ${PROVIDER_IMAGE_RECOGNITION_MODELS}
       OPENAI_PROVIDERS: ${OPENAI_PROVIDERS}
       OPENAI_CLIENTS: ${OPENAI_CLIENTS}
+      PRIORITY_API_ORDER: ${PRIORITY_API_ORDER}
     volumes:
       - /home/chebyrek/data/:/data
     restart: always

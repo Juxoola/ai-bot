@@ -217,48 +217,69 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
     
     await state.set_state(Form.waiting_for_settings_selection)
 
-async def process_image_generation_model_handler(callback_query: types.CallbackQuery, state: FSMContext):
+async def process_image_generation_model_handler(callback_query, state):
     user_id = callback_query.from_user.id
-    model_name = callback_query.data.split("gen_model_")[1]
+    data = callback_query.data.split('_', 3)
     
-    user_context = await load_context(user_id)
-    user_context["image_generation_model"] = model_name
-    await save_context(user_id, user_context)
-   
-    await asyncio.to_thread(update_image_gen_client, user_id, model_name)
-    AVAILABLE_MODELS = await av_models()
-    DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
-    DEFAULT_ASPECT_RATIO = await def_aspect()
-    DEFAULT_ENHANCE = await def_enhance()
+    if len(data) >= 3:
+        model_id = data[2]
+        api = data[3] if len(data) >= 4 else ""
+        
+        user_context = await load_context(user_id)
+        user_context["image_generation_model"] = {
+            "model_id": model_id,
+            "api": api
+        }
+        
+        # # Debug code to verify models
+        # logging.info(f"BEFORE UPDATE - Main model: {user_context['model']}, Image gen model: {user_context['image_generation_model']}")
 
-    current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
-    current_image_gen_model = model_name
-    current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
-    current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-    web_search_enabled = user_context.get("web_search_enabled", False)
+        await save_context(user_id, user_context)
 
-    show_processing_time = user_context.get("show_processing_time", True)
+        # user_context = await load_context(user_id)
+        # logging.info(f"AFTER UPDATE - Main model: {user_context['model']}, Image gen model: {user_context['image_generation_model']}")
+        
+        if api == "g4f":
+            await update_image_gen_client(user_id, model_id)
+        
+        DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
+        DEFAULT_ASPECT_RATIO = await def_aspect()
+        DEFAULT_ENHANCE = await def_enhance()
 
-    keyboard = await get_settings_keyboard(
-        current_model,
-        current_image_gen_model,
-        current_aspect_ratio,
-        current_enhance,
-        web_search_enabled,
-        show_processing_time
-    )
+        AVAILABLE_MODELS = await av_models()
+        current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
+        current_image_gen_model = f"{model_id} ({api})"
+        current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+        current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
+        web_search_enabled = user_context.get("web_search_enabled", False)
+        show_processing_time = user_context.get("show_processing_time", True)
 
-    await bot.edit_message_text(
-        "⚙️Меню настроек:",
-        chat_id=callback_query.message.chat.id,
-        message_id=callback_query.message.message_id,
-        reply_markup=keyboard
-    )
+        keyboard = await get_settings_keyboard(
+            current_model,
+            current_image_gen_model,
+            current_aspect_ratio,
+            current_enhance,
+            web_search_enabled,
+            show_processing_time
+        )
+
+        await bot.edit_message_text(
+            "⚙️Меню настроек:",
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            reply_markup=keyboard
+        )
+        
+        await bot.answer_callback_query(
+            callback_query.id,
+            text=f"Модель для генерации изображений изменена на {model_id} ({api})"
+        )
+    else:
+        await bot.answer_callback_query(
+            callback_query.id,
+            text="Ошибка при выборе модели"
+        )
     
-    await bot.answer_callback_query(
-        callback_query.id,
-        text=f"Модель генерации изменена на {model_name}"
-    )
     await state.set_state(Form.waiting_for_settings_selection)
 
 async def process_image_recognition_model_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):

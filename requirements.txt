@@ -163,3 +163,4 @@ python-docx
 openpyxl
 xlrd  
 olefile
+cachetools
