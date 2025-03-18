@@ -23,6 +23,11 @@ async def cmd_settings(message, state: FSMContext):
     current_model = AVAILABLE_MODELS[current_model_key]['model_name'] if current_model_key in AVAILABLE_MODELS else "Unknown"
     
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+    if isinstance(current_image_gen_model, dict):
+        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+        model, api = current_image_gen_model.rsplit("_", 1)
+        current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
     web_search_enabled = user_context.get("web_search_enabled", False)
@@ -110,6 +115,11 @@ async def process_enhance_selection_handler(callback_query, state):
     AVAILABLE_MODELS = await av_models()
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+    if isinstance(current_image_gen_model, dict):
+        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+        model, api = current_image_gen_model.rsplit("_", 1)
+        current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", False)
     web_search_enabled = user_context.get("web_search_enabled", False)
@@ -163,7 +173,7 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
             model_name=model_key.replace("_g4f", "")
             await asyncio.to_thread(update_user_clients, user_id, model_name)
             initial_messages = [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]
-        else:  # glhf or other APIs
+        else:  
             initial_messages = [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]
 
         user_context.update({
@@ -183,6 +193,11 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
 
         current_model = AVAILABLE_MODELS[model_key]['model_name']
         current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+        if isinstance(current_image_gen_model, dict):
+            current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+        elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+            model, api = current_image_gen_model.rsplit("_", 1)
+            current_image_gen_model = f"{model} ({api})"
         current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
         current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
         web_search_enabled = user_context.get("web_search_enabled", False)
@@ -219,67 +234,63 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
 
 async def process_image_generation_model_handler(callback_query, state):
     user_id = callback_query.from_user.id
-    data = callback_query.data.split('_', 3)
-    
-    if len(data) >= 3:
-        model_id = data[2]
-        api = data[3] if len(data) >= 4 else ""
-        
-        user_context = await load_context(user_id)
-        user_context["image_generation_model"] = {
-            "model_id": model_id,
-            "api": api
-        }
-        
-        # # Debug code to verify models
-        # logging.info(f"BEFORE UPDATE - Main model: {user_context['model']}, Image gen model: {user_context['image_generation_model']}")
-
-        await save_context(user_id, user_context)
-
-        # user_context = await load_context(user_id)
-        # logging.info(f"AFTER UPDATE - Main model: {user_context['model']}, Image gen model: {user_context['image_generation_model']}")
-        
-        if api == "g4f":
-            await update_image_gen_client(user_id, model_id)
-        
-        DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
-        DEFAULT_ASPECT_RATIO = await def_aspect()
-        DEFAULT_ENHANCE = await def_enhance()
-
-        AVAILABLE_MODELS = await av_models()
-        current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
-        current_image_gen_model = f"{model_id} ({api})"
-        current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
-        current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-        web_search_enabled = user_context.get("web_search_enabled", False)
-        show_processing_time = user_context.get("show_processing_time", True)
-
-        keyboard = await get_settings_keyboard(
-            current_model,
-            current_image_gen_model,
-            current_aspect_ratio,
-            current_enhance,
-            web_search_enabled,
-            show_processing_time
-        )
-
-        await bot.edit_message_text(
-            "⚙️Меню настроек:",
-            chat_id=callback_query.message.chat.id,
-            message_id=callback_query.message.message_id,
-            reply_markup=keyboard
-        )
-        
-        await bot.answer_callback_query(
-            callback_query.id,
-            text=f"Модель для генерации изображений изменена на {model_id} ({api})"
-        )
+    prefix = "image_gen_model_"
+    callback_data = callback_query.data
+    if callback_data.startswith(prefix):
+        payload = callback_data[len(prefix):]  
+        last_underscore = payload.rfind("_")
+        if last_underscore != -1:
+            model_id = payload[:last_underscore]      
+            api = payload[last_underscore+1:]           
+        else:
+            model_id = payload
+            api = ""
     else:
-        await bot.answer_callback_query(
-            callback_query.id,
-            text="Ошибка при выборе модели"
-        )
-    
+        parts = callback_query.data.split("_", 3)
+        model_id = parts[2] if len(parts) >= 3 else ""
+        api = parts[3] if len(parts) >= 4 else ""
+
+    user_context = await load_context(user_id)
+    user_context["image_generation_model"] = {
+        "model_id": model_id,
+        "api": api
+    }
+
+    if api == "g4f":
+        await update_image_gen_client(user_id, model_id)
+
+    DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
+    DEFAULT_ASPECT_RATIO = await def_aspect()
+    DEFAULT_ENHANCE = await def_enhance()
+
+    AVAILABLE_MODELS = await av_models()
+    current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
+    current_image_gen_model = f"{model_id} ({api})"
+    current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+    current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
+    web_search_enabled = user_context.get("web_search_enabled", False)
+    show_processing_time = user_context.get("show_processing_time", True)
+
+    keyboard = await get_settings_keyboard(
+        current_model,
+        current_image_gen_model,
+        current_aspect_ratio,
+        current_enhance,
+        web_search_enabled,
+        show_processing_time
+    )
+
+    await bot.edit_message_text(
+        "⚙️Меню настроек:",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=keyboard
+    )
+
+    await bot.answer_callback_query(
+        callback_query.id,
+        text=f"Модель для генерации изображений изменена на {model_id} ({api})"
+    )
     await state.set_state(Form.waiting_for_settings_selection)
 
 async def process_image_recognition_model_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
@@ -298,6 +309,11 @@ async def process_image_recognition_model_selection_handler(callback_query: type
 
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+    if isinstance(current_image_gen_model, dict):
+        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+        model, api = current_image_gen_model.rsplit("_", 1)
+        current_image_gen_model = f"{model} ({api})"
     current_image_rec_model = model_name
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
@@ -342,6 +358,11 @@ async def process_aspect_ratio_selection_handler(callback_query, state):
     AVAILABLE_MODELS = await av_models()
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+    if isinstance(current_image_gen_model, dict):
+        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+        model, api = current_image_gen_model.rsplit("_", 1)
+        current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
     web_search_enabled = user_context.get("web_search_enabled", False)
@@ -379,6 +400,11 @@ async def toggle_web_search_handler(callback_query: types.CallbackQuery, state: 
     AVAILABLE_MODELS = await av_models()
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+    if isinstance(current_image_gen_model, dict):
+        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+        model, api = current_image_gen_model.rsplit("_", 1)
+        current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", False)
     web_search_enabled = user_context["web_search_enabled"]
@@ -418,6 +444,11 @@ async def toggle_processing_time_handler(callback_query: types.CallbackQuery, st
     AVAILABLE_MODELS = await av_models()
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+    if isinstance(current_image_gen_model, dict):
+        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+        model, api = current_image_gen_model.rsplit("_", 1)
+        current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
     web_search_enabled = user_context.get("web_search_enabled", False)

@@ -156,20 +156,21 @@ async def get_settings_keyboard(
     web_search_enabled,
     show_processing_time,
 ):
+    n=15
+    current_model_short = current_model[:n-1] + "…"  if len(current_model) > n else current_model
+    current_image_gen_model_short = current_image_gen_model[:n-1] + "…" if len(current_image_gen_model) > n else current_image_gen_model
+
+    
     buttons = [
-        [InlineKeyboardButton(text=f"💬 Модель: {current_model}", callback_data="select_model")],
-        [InlineKeyboardButton(text=f"🎨 Модель генерации: {current_image_gen_model}", callback_data="select_image_gen_model")],
-        [InlineKeyboardButton(text=f"📐 Соотношение сторон: {current_aspect_ratio}", callback_data="select_aspect_ratio")],
-        [InlineKeyboardButton(text=f"✨ Enhance: {'включено' if current_enhance else 'выключено'}", callback_data="toggle_enhance")],
-        [InlineKeyboardButton(
-            text=f"🔍 Веб-поиск: {'включен' if web_search_enabled else 'выключен'}",
-            callback_data="toggle_web_search"
-        )],
-        [InlineKeyboardButton(text=f"⏱️ Время обработки: {'включено' if show_processing_time else 'выключено'}", callback_data="toggle_processing_time")],
+        [InlineKeyboardButton(text=f"💬 Модель: {current_model_short}", callback_data="select_model")],
+        [InlineKeyboardButton(text=f"🎨 Генерация: {current_image_gen_model_short}", callback_data="select_image_gen_model")],
+        [InlineKeyboardButton(text=f"📐 Размер: {current_aspect_ratio}", callback_data="select_aspect_ratio")],
+        [InlineKeyboardButton(text=f"✨ Enhance: {'Вкл' if current_enhance else 'Выкл'}", callback_data="toggle_enhance")],
+        [InlineKeyboardButton(text=f"🔍 Поиск: {'Вкл' if web_search_enabled else 'Выкл'}", callback_data="toggle_web_search")],
+        [InlineKeyboardButton(text=f"⏱️ Время: {'Вкл' if show_processing_time else 'Выкл'}", callback_data="toggle_processing_time")],
         [InlineKeyboardButton(text="❌ Закрыть", callback_data="close_settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 
 async def get_aspect_ratio_selection_keyboard():
     aspect_ratio_options = {
@@ -181,7 +182,6 @@ async def get_aspect_ratio_selection_keyboard():
         "16:9": (1792, 1024),
         "9:16": (1024, 1792),
         "21:9": (2048, 896),
-        "9:21": (896, 2048),
     }
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     for ratio, dimensions in aspect_ratio_options.items():

@@ -367,12 +367,16 @@ async def process_image_edit_prompt_handler(message: types.Message, state: FSMCo
     file_id = photo.file_id
     file = await bot.get_file(file_id)
     file_path = file.file_path
-    
     image_data = await bot.download_file(file_path)
     
-    await state.update_data(image_edit_data=image_data)
+    data = await state.get_data()
+    existing_images = data.get("image_edit_data", [])
+    if not isinstance(existing_images, list):
+        existing_images = [existing_images] if existing_images else []
+    existing_images.append(image_data)
+    await state.update_data(image_edit_data=existing_images)
     
-    await message.reply("🖌️ Пожалуйста, опишите какие изменения нужно внести в изображение:")
+    await message.reply("🖌️ Фото добавлено для редактирования. Пришлите инструкцию или добавьте еще фото:")
     await state.set_state(Form.waiting_for_image_edit_instructions)
 
 @dp.message(Form.waiting_for_image_generation_prompt)

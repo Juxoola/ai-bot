@@ -49,15 +49,13 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     DEFAULT_ASPECT_RATIO = await def_aspect()
     DEFAULT_ENHANCE = await def_enhance()
     
-    # Handle the new model structure (dict with model_id and api)
     model_info = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
     
     if isinstance(model_info, dict):
         model_id = model_info.get("model_id")
         api_type = model_info.get("api")
     else:
-        # Обрабатываем устаревший формат (строка)
-        # Ищем последнее подчеркивание для отделения API
+  
         last_underscore_pos = model_info.rfind('_')
         if last_underscore_pos != -1:
             model_id = model_info[:last_underscore_pos]
@@ -75,7 +73,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     await state.update_data(enhance=enhance)
 
     aspect_ratio_options = {
-        "1:1": (1024, 1024),
+        "1:1": (2048, 2048),
         "3:2": (1536, 1024),
         "2:3": (1024, 1536),
         "4:3": (1536, 1152),
@@ -83,7 +81,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         "16:9": (1792, 1024),
         "9:16": (1024, 1792),
         "21:9": (2048, 896),
-        "9:21": (896, 2048),
     }
     width, height = aspect_ratio_options.get(aspect_ratio, (1024, 1024)) 
 
@@ -174,15 +171,20 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 break 
 
     elif api_type in openai_clients and api_type != "poli":
-        # Обработка всех OpenAI-совместимых API (fresed, openai и др.)
         client = openai_clients.get(api_type)
         try:
             size_str = f"{width}x{height}"
-            response = await client.images.generate(
-                model=model_id,
-                prompt=prompt,
-                size=size_str
+            response = await run_with_timeout(
+                client.images.generate(
+                    model=model_id,
+                    prompt=prompt,
+                    size=size_str
+                ),
+                timeout=60,
+                msg=message
             )
+            if response is None:
+                return
             if hasattr(response, 'generated_images'):
                 image_data = response.generated_images[0].image.getvalue()
             elif hasattr(response, 'data') and response.data:
@@ -236,7 +238,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 )
                 
                 if response is None:
-                    await bot.send_message(user_id, "🚨Превышено время ожидания при генерации изображения. Пожалуйста, попробуйте еще раз.")
                     return
                 
                 image_data = None
@@ -282,21 +283,24 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
 
     elif api_type == "g4f":
         image_gen_client = get_client(user_id, "g4f_image_gen_client", model_name=model_id)
-
+    
         try:
-            response = await asyncio.to_thread(
-                lambda: (
-                    image_gen_client.images.generate(
-                        prompt=prompt,
-                        model=model_id,
-                        response_format="url",
-                        enhance=False,  
-                        private=True,
-                        width=width,
-                        height=height,
-                    )
+            response_coroutine = asyncio.to_thread(
+                lambda: image_gen_client.images.generate(
+                    prompt=prompt,
+                    model=model_id,
+                    response_format="url",
+                    enhance=False,
+                    private=True,
+                    width=width,
+                    height=height,
                 )
             )
+            response = await run_with_timeout(response_coroutine, timeout=60, msg=message)
+    
+            if response is None:
+                return
+            
             image_url = response.data[0].url
             caption = f"Фото сгенерировано моделью {model_id}"
             if aspect_ratio:
@@ -313,9 +317,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             await bot.send_document(user_id, document=image_url, caption=caption2)
         except Exception as e:
             logging.error(f"Error during image generation: {e}")
-            await bot.send_message(
-                user_id, f"🚨Ошибка во время генерации изображения: {e}"
-            )
+            await bot.send_message(user_id, f"🚨Ошибка во время генерации изображения: {e}")
 
     end_time = time.time()
     processing_time = end_time - start_time
@@ -564,15 +566,28 @@ async def process_image_editing(message: types.Message, state: FSMContext):
     
     if api_type == "gemini" and model_id in google_ai_models:
         try:
-            image_bytes = BytesIO(image_data.read())
-            image_bytes.seek(0)
-            
-            pil_image = await asyncio.to_thread(lambda: Image.open(image_bytes))
-            
+            if isinstance(image_data, list):
+                pil_images = []
+                for img in image_data:
+                    if hasattr(img, 'read'):
+                        image_bytes = BytesIO(img.read())
+                    else:
+                        image_bytes = BytesIO(img)
+                    image_bytes.seek(0)
+                    pil_img = await asyncio.to_thread(lambda: Image.open(image_bytes))
+                    pil_images.append(pil_img)
+            else:
+                image_bytes = BytesIO(image_data.read())
+                image_bytes.seek(0)
+                pil_img = await asyncio.to_thread(lambda: Image.open(image_bytes))
+                pil_images = [pil_img]
+    
+            contents = [instructions, *pil_images]
+    
             response_coroutine = asyncio.to_thread(
                 lambda: genai_client.models.generate_content(
                     model=model_id,
-                    contents=[instructions, pil_image],
+                    contents=contents,
                     config=genai_types.GenerateContentConfig(
                         response_modalities=['Text', 'Image']
                     )

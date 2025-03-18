@@ -92,9 +92,9 @@ DEFAULT_WHISPER_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]
 
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
-DEFAULT_MODEL = "gpt-4o"
+DEFAULT_MODEL = "gemini-2.0-flash"
 DEFAULT_IMAGE_GEN_MODEL = "flux_poli"
-DEFAULT_IMAGE_RECOGNITION_MODEL = "gpt-4o"
+DEFAULT_IMAGE_RECOGNITION_MODEL = "gemini-2.0-flash"
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
 DEFAULT_ASPECT_RATIO = "1:1"
 DEFAULT_ENHANCE = True
@@ -164,6 +164,25 @@ class DatabaseConnectionPool:
     async def get_stats(self):
         async with self.lock:
             return self.connection_stats.copy()
+
+    async def close_all(self):
+        async with self.lock:
+            while self.pool:
+                conn = self.pool.popleft()
+                try:
+                    await conn.close()
+                except Exception as e:
+                    logging.error(f"Error closing connection from pool: {e}")
+            
+            for conn in list(self.in_use):
+                try:
+                    await conn.close()
+                except Exception as e:
+                    logging.error(f"Error closing in-use connection: {e}")
+                
+            self.in_use.clear()
+            self.connection_timeouts.clear()
+            self.connection_stats["current_active"] = 0
 
 db_pool = DatabaseConnectionPool(max_connections=20)
 
