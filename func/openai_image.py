@@ -5,32 +5,7 @@ from aiogram import types
 from aiogram.fsm.context import FSMContext
 from config import Form, get_openai_client, bot
 from database import load_context, save_context
-from .messages import call_openai_completion
-
-async def run_with_timeout(coro, timeout, msg: types.Message = None):
-
-    task = asyncio.create_task(coro)
-    try:
-        result = await asyncio.wait_for(task, timeout=timeout)
-        return result
-    except asyncio.TimeoutError:
-        logging.error(f"Превышено время ожидания ответа (таймаут {timeout} сек).")
-        if not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        if msg:
-            await msg.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз.")
-        return None
-    except Exception as e:
-        logging.error(f"Ошибка в run_with_timeout: {e}")
-        if not task.done():
-            task.cancel()
-        if msg:
-            await msg.reply(f"🚨 Произошла ошибка: {e}")
-        return None
+from .messages import call_openai_completion_sync, async_run_with_timeout
 
 async def process_image_with_openai(message: types.Message, state: FSMContext, prompt: str):
 
@@ -65,14 +40,17 @@ async def process_image_with_openai(message: types.Message, state: FSMContext, p
     ]
 
     try:
-        wrapped_coroutine = await run_with_timeout(
-            call_openai_completion(api_type, model, messages_payload),
-            timeout=60,
-            msg=message
+        completion = await async_run_with_timeout(
+            call_openai_completion_sync,
+            60,
+            api_type, 
+            model, 
+            messages_payload
         )
-        if wrapped_coroutine is None:
+        
+        if completion is None:
             return
-        completion = await wrapped_coroutine
+            
         response_text = completion.choices[0].message.content
       
         user_context["messages"].extend(messages_payload)

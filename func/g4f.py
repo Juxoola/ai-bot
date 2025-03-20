@@ -9,7 +9,7 @@ import logging
 from io import BytesIO
 import tempfile
 import os
-from func.openai_image import run_with_timeout
+from func.messages import async_run_with_timeout
 import aiohttp
 from urllib.parse import quote
 import random
@@ -18,6 +18,11 @@ from google.genai import types as genai_types
 from datetime import timedelta
 import time
 from PIL import Image
+import base64
+import requests
+import multiprocessing
+import queue
+import threading
 
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
@@ -28,6 +33,7 @@ if GEMINI_API_KEY:
 else:
     genai_client = None
     logging.warning("GEMINI_API_KEY is not set. Google AI image generation will be unavailable.")
+
 
 async def process_image_generation_prompt(message: types.Message, state: FSMContext):
     start_time = time.time()
@@ -81,6 +87,8 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         "16:9": (1792, 1024),
         "9:16": (1024, 1792),
         "21:9": (2048, 896),
+        "9:21": (896, 2048),
+        "2:2": (1024, 1024),
     }
     width, height = aspect_ratio_options.get(aspect_ratio, (1024, 1024)) 
 
@@ -103,7 +111,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         except Exception as e:
             logging.error(f"Error during prompt improvement: {e}")
             await bot.send_message(user_id, f"🚨Ошибка при улучшении промпта: {e}")
-
     if api_type == "poli":
         async def fetch_image():
             encoded_prompt = quote(prompt)
@@ -174,14 +181,13 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         client = openai_clients.get(api_type)
         try:
             size_str = f"{width}x{height}"
-            response = await run_with_timeout(
-                client.images.generate(
+            response = await async_run_with_timeout(
+                lambda: client.images.generate(
                     model=model_id,
                     prompt=prompt,
                     size=size_str
                 ),
-                timeout=60,
-                msg=message
+                timeout=60
             )
             if response is None:
                 return
@@ -221,7 +227,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     elif api_type == "gemini":
         if genai_client:
             try:
-                response_coroutine = asyncio.to_thread(
+                response = asyncio.to_thread(
                     lambda: genai_client.models.generate_content(
                         model=model_id,
                         contents=prompt,
@@ -231,11 +237,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     )
                 )
                 
-                response = await run_with_timeout(
-                    response_coroutine,
-                    timeout=60,
-                    msg=message
-                )
                 
                 if response is None:
                     return
@@ -285,7 +286,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         image_gen_client = get_client(user_id, "g4f_image_gen_client", model_name=model_id)
     
         try:
-            response_coroutine = asyncio.to_thread(
+            response = await async_run_with_timeout(
                 lambda: image_gen_client.images.generate(
                     prompt=prompt,
                     model=model_id,
@@ -294,9 +295,9 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     private=True,
                     width=width,
                     height=height,
-                )
+                ),
+                timeout=60
             )
-            response = await run_with_timeout(response_coroutine, timeout=60, msg=message)
     
             if response is None:
                 return
@@ -584,7 +585,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
     
             contents = [instructions, *pil_images]
     
-            response_coroutine = asyncio.to_thread(
+            response = asyncio.to_thread(
                 lambda: genai_client.models.generate_content(
                     model=model_id,
                     contents=contents,
@@ -594,11 +595,6 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 )
             )
             
-            response = await run_with_timeout(
-                response_coroutine,
-                timeout=60, 
-                msg=message
-            )
             
             if response is None:
                 await bot.send_message(

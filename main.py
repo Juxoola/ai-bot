@@ -1,3 +1,7 @@
+import logging
+# Configure logging before any imports to prevent overrides
+logging.basicConfig(level=logging.INFO, force=True)
+
 from dotenv import load_dotenv 
 
 load_dotenv()
@@ -23,13 +27,11 @@ from settings import cmd_settings, select_model_handler, select_image_gen_model_
 from func.openai_image import process_custom_image_prompt_openai, handle_image_openai
 
 from aiogram.enums import ParseMode
-import logging
 import asyncio
 from aiogram import types, F
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
-logging.basicConfig(level=logging.INFO)
 
 
 
@@ -458,6 +460,14 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
     model_key = user_context["model"]
     model_id, api_type = model_key.split('_')
     
+    if message.voice or message.audio:
+        if api_type == "poli" and model_id == "openai-audio":
+            await handle_all_messages(message, state, is_admin, is_allowed, audio_response=True)
+            return
+    if message.text and api_type == "poli" and model_id == "openai-audio":
+        await handle_all_messages(message, state, is_admin, is_allowed, audio_response=True)
+        return
+        
     image_rec_models = await rec_models()
     allowed_apis = list(openai_clients.keys()) + ["g4f"]
     if message.document:
@@ -523,7 +533,6 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         await handle_all_messages(message, state, is_admin, is_allowed)
 
 async def shutdown():
-
     try:
         await db_pool.close_all()
         print("Database connections closed successfully")
@@ -549,7 +558,6 @@ async def main():
         print(f"Error during bot execution: {e}")
     finally:
         await shutdown()
-        
 
 if __name__ == "__main__":
     try:

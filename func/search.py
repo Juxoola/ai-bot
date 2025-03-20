@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 import spacy
 from concurrent.futures import ThreadPoolExecutor
 import google.generativeai as genai
-from .messages import call_openai_completion
+from .messages import call_openai_completion_sync, async_run_with_timeout
 
 DEFAULT_INSTRUCTIONS = """
 Using the provided web search results, to write a comprehensive reply to the user request.
@@ -236,12 +236,6 @@ def spacy_get_keywords(text: str):
     except:
         return text
         
-async def run_with_timeout(coro, timeout):
-    try:
-        return await asyncio.wait_for(coro, timeout=timeout)
-    except asyncio.TimeoutError:
-        logging.error(f"Превышено время ожидания ответа от модели.")
-        return None
 
 async def process_search_query(message: types.Message, state: FSMContext):
     query = message.text
@@ -275,13 +269,18 @@ async def process_search_query(message: types.Message, state: FSMContext):
 
         if api_type in openai_clients:
 
-            wrapped_coro = await run_with_timeout(
-                call_openai_completion(api_type, model_id, user_context["messages"]),
-                timeout=60
-            )
-            if wrapped_coro is not None:
-                completion = await wrapped_coro
-                response_text = completion.choices[0].message.content
+            try:
+                result = await async_run_with_timeout(
+                    lambda: call_openai_completion_sync(api_type, model_id, user_context["messages"]),
+                    60
+                )
+            except TimeoutError as e:
+                logging.error(f"Timeout in openai_client request (long message): {e}")
+                await message.reply("🕒 Превышено время ожидания ответа (60 сек). Попробуйте еще раз или выберите другую модель.")
+                result = None
+
+            if result:
+                response_text = result.choices[0].message.content
 
         elif api_type == "g4f":
             def g4f_request():
@@ -291,7 +290,13 @@ async def process_search_query(message: types.Message, state: FSMContext):
                     messages=user_context["messages"],
                 )
 
-            response = await run_with_timeout(asyncio.to_thread(g4f_request), timeout=60)
+            try:
+                response = await async_run_with_timeout(g4f_request, 60)
+            except TimeoutError as e:
+                logging.error(f"Timeout in g4f_image_request (long message): {e}")
+                await message.reply(f"🕒 Превышено время ожидания ответа (60 сек). Попробуйте еще раз или выберите другую модель.")
+                response = None
+
             if response:
                 response_text = response.choices[0].message.content
 
@@ -300,7 +305,13 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 gemini_model = genai.GenerativeModel(model_id)
                 return gemini_model.generate_content(user_context["messages"])
 
-            response = await run_with_timeout(asyncio.to_thread(gemini_request), timeout=60)
+            try:
+                response = await async_run_with_timeout(gemini_request, 60)
+            except TimeoutError as e:
+                logging.error(f"Timeout in gemini_request (long message): {e}")
+                await message.reply("🕒 Превышено время ожидания ответа (60 сек). Попробуйте еще раз или выберите другую модель.")
+                response = None
+            
             if response:
                 response_text = response.text
 

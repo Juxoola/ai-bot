@@ -182,6 +182,8 @@ async def get_aspect_ratio_selection_keyboard():
         "16:9": (1792, 1024),
         "9:16": (1024, 1792),
         "21:9": (2048, 896),
+        "9:21": (896, 2048),
+        "2:2": (1024, 1024),
     }
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     for ratio, dimensions in aspect_ratio_options.items():

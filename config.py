@@ -16,6 +16,33 @@ import importlib
 
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
+timeout_config_str = os.environ.get("TIMEOUT_CONFIG", '{}')
+try:
+    TIMEOUT_CONFIG = json.loads(timeout_config_str)
+    logging.info(f"Загружена конфигурация таймаутов: {TIMEOUT_CONFIG}")
+except json.JSONDecodeError:
+    logging.error(f"Ошибка при парсинге TIMEOUT_CONFIG: {timeout_config_str}")
+    TIMEOUT_CONFIG = {"apis": [], "models": {}}
+
+def should_bypass_timeout(model_id, api_type):
+    """
+    Определяет, нужно ли отключить таймаут для заданной комбинации модели и API
+    
+    Args:
+        model_id (str): Идентификатор модели
+        api_type (str): Тип API (например, 'g4f', 'gemini')
+    
+    Returns:
+        bool: True, если таймаут нужно отключить, иначе False
+    """
+
+    # Проверка модели для конкретного API
+    api_models = TIMEOUT_CONFIG.get("models", {}).get(api_type, [])
+    if model_id in api_models:
+        return True
+    
+    return False
+
 bot = Bot(token=BOT_TOKEN)
 # States
 class Form(StatesGroup):
@@ -96,7 +123,7 @@ for provider, cfg in providers_config.items():
     if not api_key or not base_url:
         logging.warning(f"Для провайдера {provider} не задан 'api_key' или 'base_url'. Пропускаем.")
         continue
-    openai_clients[provider] = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+    openai_clients[provider] = openai.OpenAI(api_key=api_key, base_url=base_url)
 
 genai.configure(api_key=GEMINI_API_KEY)
 
