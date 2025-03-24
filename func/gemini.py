@@ -1,6 +1,6 @@
 from aiogram import types
 from aiogram.fsm.context import FSMContext
-from config import Form,  bot
+from config import Form,  bot, DEFAULT_SYSTEM_PROMPTS
 from database import load_context,save_context,av_models
 import asyncio
 import base64
@@ -51,7 +51,7 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
         return
 
     user_context = await load_context(user_id)
-    model_key = user_context["model"]  # Формат: "model_id_api"
+    model_key = user_context["model"]  
     model_id, api_type = model_key.split('_')
 
     new_message = {
@@ -67,10 +67,32 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
     await save_context(user_id, user_context)
     
     try:
-        model = genai.GenerativeModel(model_id)
-        chat = model.start_chat(history=user_context["messages"][:-1])
+        system_instruction = None
+        messages_for_model = []
+        
+        for msg in user_context["messages"]:
+            if msg["role"] == "system" and "parts" in msg and msg["parts"]:
+                system_text = msg["parts"][0].get("text", "")
+                if system_text:
+                    system_instruction = system_text
+            else:
+                messages_for_model.append(msg)
+        
+        if not system_instruction:
+            system_instruction = DEFAULT_SYSTEM_PROMPTS["default"]
+        
+        if system_instruction:
+            from google.genai import types as genai_types
+            model = genai.GenerativeModel(
+                model_id,
+                system_instruction=system_instruction
+            )
+        else:
+            model = genai.GenerativeModel(model_id)
+        
+        chat = model.start_chat(history=messages_for_model[:-1])
         response = await asyncio.to_thread(
-            lambda: chat.send_message(user_context["messages"][-1])
+            lambda: chat.send_message(messages_for_model[-1])
         )
 
         await bot.send_message(user_id, response.text, parse_mode=ParseMode.MARKDOWN)

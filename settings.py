@@ -1,10 +1,10 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from keyboards import get_aspect_ratio_selection_keyboard, get_model_selection_keyboard, get_image_gen_model_selection_keyboard, get_image_recognition_model_selection_keyboard, get_settings_keyboard
-from config import bot, Form, update_user_clients, update_image_gen_client
+from keyboards import get_aspect_ratio_selection_keyboard, get_model_selection_keyboard, get_image_gen_model_selection_keyboard, get_image_recognition_model_selection_keyboard, get_settings_keyboard, get_voice_selection_keyboard, get_role_selection_keyboard, get_api_selection_keyboard, get_models_by_api_keyboard
+from config import bot, Form, update_user_clients, update_image_gen_client, DEFAULT_SYSTEM_PROMPTS
 from aiogram.fsm.context import FSMContext
 import logging
 from aiogram import types
-from database import load_context, save_context, av_models, gen_models, rec_models, def_rec_model, def_gen_model, def_aspect, def_enhance
+from database import load_context, save_context, av_models, gen_models, rec_models, def_rec_model, def_gen_model, def_aspect, def_enhance, def_voice, av_voices
 import google.generativeai as genai
 import asyncio
 
@@ -17,6 +17,7 @@ async def cmd_settings(message, state: FSMContext):
     DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
     DEFAULT_ASPECT_RATIO = await def_aspect()
     DEFAULT_ENHANCE = await def_enhance()
+    DEFAULT_VOICE = await def_voice()
     AVAILABLE_MODELS = await av_models()
 
     current_model_key = user_context["model"] 
@@ -30,20 +31,21 @@ async def cmd_settings(message, state: FSMContext):
         current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-    web_search_enabled = user_context.get("web_search_enabled", False)
-    show_processing_time = user_context.get("show_processing_time", True)
+    current_voice = user_context.get("voice", DEFAULT_VOICE)
+    show_processing_time = user_context.get("show_processing_time", False)
+    current_role = user_context.get("system_role", "default")
 
-    keyboard = await get_settings_keyboard(
+    settings_keyboard = await get_settings_keyboard(
         current_model,
         current_image_gen_model,
         current_aspect_ratio,
         current_enhance,
-        web_search_enabled,
-        show_processing_time
+        show_processing_time,
+        current_voice,
+        current_role
     )
-
-    msg = await message.reply("⚙️Меню настроек:", reply_markup=keyboard)
-    await state.update_data(settings_message_id=msg.message_id, user_message_id=message.message_id)
+    
+    await message.reply("⚙️ Настройки:", reply_markup=settings_keyboard)
     await state.set_state(Form.waiting_for_settings_selection)
 
 
@@ -51,10 +53,27 @@ async def select_model_handler(callback_query: types.CallbackQuery, state: FSMCo
     AVAILABLE_MODELS = await av_models()
     await state.update_data(available_models=AVAILABLE_MODELS)
     
-    keyboard = await get_model_selection_keyboard(AVAILABLE_MODELS)
+    keyboard = await get_api_selection_keyboard(AVAILABLE_MODELS)
 
     await bot.edit_message_text(
-        "Выберите модель для чата:",
+        "Выберите API для чата:",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=keyboard
+    )
+    await state.set_state(Form.waiting_for_api_selection)
+
+async def api_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    AVAILABLE_MODELS = data.get("available_models", await av_models())
+    
+    api_type = callback_query.data.split("api_")[1]
+    await state.update_data(selected_api=api_type)
+    
+    keyboard = await get_models_by_api_keyboard(AVAILABLE_MODELS, api_type)
+
+    await bot.edit_message_text(
+        f"Выберите модель {api_type.upper()} для чата:",
         chat_id=callback_query.message.chat.id,
         message_id=callback_query.message.message_id,
         reply_markup=keyboard
@@ -100,6 +119,28 @@ async def select_aspect_ratio_handler(callback_query: types.CallbackQuery, state
     )
     await state.set_state(Form.waiting_for_aspect_ratio)
 
+async def select_voice_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    available_voices = await av_voices()
+    keyboard = await get_voice_selection_keyboard(available_voices)
+
+    await bot.edit_message_text(
+        "Выберите голос для аудио-ответов:",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=keyboard
+    )
+    await state.set_state(Form.waiting_for_voice_selection)
+
+async def select_role_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    keyboard = await get_role_selection_keyboard()
+
+    await bot.edit_message_text(
+        "Выберите роль для бота:",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=keyboard
+    )
+    await state.set_state(Form.waiting_for_role_selection)
 
 async def process_enhance_selection_handler(callback_query, state):
     user_id = callback_query.from_user.id
@@ -111,6 +152,7 @@ async def process_enhance_selection_handler(callback_query, state):
     DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
     DEFAULT_ASPECT_RATIO = await def_aspect()
     DEFAULT_ENHANCE = await def_enhance()
+    DEFAULT_VOICE = await def_voice()
 
     AVAILABLE_MODELS = await av_models()
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
@@ -121,18 +163,19 @@ async def process_enhance_selection_handler(callback_query, state):
         model, api = current_image_gen_model.rsplit("_", 1)
         current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
-    current_enhance = user_context.get("enhance", False)
-    web_search_enabled = user_context.get("web_search_enabled", False)
-
+    current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
     show_processing_time = user_context.get("show_processing_time", True)
+    current_voice = user_context.get("voice", DEFAULT_VOICE)
+    current_role = user_context.get("system_role", "default")
 
     keyboard = await get_settings_keyboard(
         current_model,
         current_image_gen_model,
         current_aspect_ratio,
         current_enhance,
-        web_search_enabled,
-        show_processing_time
+        show_processing_time,
+        current_voice,
+        current_role
     )
 
     await bot.edit_message_text(
@@ -167,14 +210,17 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
     if model_key in AVAILABLE_MODELS:
         new_api_type = AVAILABLE_MODELS[model_key]["api"]
         
+        system_role = user_context.get("system_role", "default")
+        system_prompt = DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"])
+        
         if new_api_type == "gemini":
-            initial_messages = []
-        elif new_api_type == "g4f":
+            initial_messages = [{"role": "system", "parts": [{"text": system_prompt}]}]
+        else:
+            initial_messages = [{"role": "system", "content": system_prompt}]
+            
+        if new_api_type == "g4f":
             model_name=model_key.replace("_g4f", "")
             await asyncio.to_thread(update_user_clients, user_id, model_name)
-            initial_messages = [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]
-        else:  
-            initial_messages = [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]
 
         user_context.update({
             "model": model_key,
@@ -190,6 +236,7 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
         DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
         DEFAULT_ASPECT_RATIO = await def_aspect()
         DEFAULT_ENHANCE = await def_enhance()
+        DEFAULT_VOICE = await def_voice()
 
         current_model = AVAILABLE_MODELS[model_key]['model_name']
         current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
@@ -200,17 +247,18 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
             current_image_gen_model = f"{model} ({api})"
         current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
         current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-        web_search_enabled = user_context.get("web_search_enabled", False)
-
+        current_voice = user_context.get("voice", DEFAULT_VOICE)
         show_processing_time = user_context.get("show_processing_time", True)
+        current_role = user_context.get("system_role", "default")
 
         keyboard = await get_settings_keyboard(
             current_model,
             current_image_gen_model,
             current_aspect_ratio,
             current_enhance,
-            web_search_enabled,
-            show_processing_time
+            show_processing_time,
+            current_voice,
+            current_role
         )
 
         await bot.edit_message_text(
@@ -262,22 +310,25 @@ async def process_image_generation_model_handler(callback_query, state):
     DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
     DEFAULT_ASPECT_RATIO = await def_aspect()
     DEFAULT_ENHANCE = await def_enhance()
+    DEFAULT_VOICE = await def_voice()
 
     AVAILABLE_MODELS = await av_models()
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
     current_image_gen_model = f"{model_id} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-    web_search_enabled = user_context.get("web_search_enabled", False)
     show_processing_time = user_context.get("show_processing_time", True)
+    current_voice = user_context.get("voice", DEFAULT_VOICE)
+    current_role = user_context.get("system_role", "default")
 
     keyboard = await get_settings_keyboard(
         current_model,
         current_image_gen_model,
         current_aspect_ratio,
         current_enhance,
-        web_search_enabled,
-        show_processing_time
+        show_processing_time,
+        current_voice,
+        current_role
     )
 
     await bot.edit_message_text(
@@ -306,6 +357,7 @@ async def process_image_recognition_model_selection_handler(callback_query: type
     DEFAULT_IMAGE_RECOGNITION_MODEL = await def_rec_model()
     DEFAULT_ASPECT_RATIO = await def_aspect()
     DEFAULT_ENHANCE = await def_enhance()
+    DEFAULT_VOICE = await def_voice()
 
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
@@ -317,17 +369,18 @@ async def process_image_recognition_model_selection_handler(callback_query: type
     current_image_rec_model = model_name
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-    web_search_enabled = user_context.get("web_search_enabled", False)
-
     show_processing_time = user_context.get("show_processing_time", True)
+    current_voice = user_context.get("voice", DEFAULT_VOICE)
+    current_role = user_context.get("system_role", "default")
 
     keyboard = await get_settings_keyboard(
         current_model,
         current_image_gen_model,
         current_aspect_ratio,
         current_enhance,
-        web_search_enabled,
-        show_processing_time
+        show_processing_time,
+        current_voice,
+        current_role
     )
 
     await bot.edit_message_text(
@@ -354,6 +407,7 @@ async def process_aspect_ratio_selection_handler(callback_query, state):
     DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
     DEFAULT_ASPECT_RATIO = await def_aspect()
     DEFAULT_ENHANCE = await def_enhance()
+    DEFAULT_VOICE = await def_voice()
 
     AVAILABLE_MODELS = await av_models()
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
@@ -365,16 +419,18 @@ async def process_aspect_ratio_selection_handler(callback_query, state):
         current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-    web_search_enabled = user_context.get("web_search_enabled", False)
     show_processing_time = user_context.get("show_processing_time", True)
+    current_voice = user_context.get("voice", DEFAULT_VOICE)
+    current_role = user_context.get("system_role", "default")
 
     keyboard = await get_settings_keyboard(
         current_model,
         current_image_gen_model,
         current_aspect_ratio,
         current_enhance,
-        web_search_enabled,
-        show_processing_time
+        show_processing_time,
+        current_voice,
+        current_role
     )
 
     await bot.edit_message_text(
@@ -384,50 +440,6 @@ async def process_aspect_ratio_selection_handler(callback_query, state):
         reply_markup=keyboard
     )
     await bot.answer_callback_query(callback_query.id, f"Выбрано соотношение сторон: {aspect_ratio}")
-    await state.set_state(Form.waiting_for_settings_selection)
-
-async def toggle_web_search_handler(callback_query: types.CallbackQuery, state: FSMContext):
-    user_id = callback_query.from_user.id
-    user_context = await load_context(user_id)
-
-    user_context["web_search_enabled"] = not user_context.get("web_search_enabled", False)
-    await save_context(user_id, user_context)
-
-    DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
-    DEFAULT_ASPECT_RATIO = await def_aspect()
-    DEFAULT_ENHANCE = await def_enhance()
-
-    AVAILABLE_MODELS = await av_models()
-    current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
-    current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
-    if isinstance(current_image_gen_model, dict):
-        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
-    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
-        model, api = current_image_gen_model.rsplit("_", 1)
-        current_image_gen_model = f"{model} ({api})"
-    current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
-    current_enhance = user_context.get("enhance", False)
-    web_search_enabled = user_context["web_search_enabled"]
-    show_processing_time = user_context.get("show_processing_time", True)
-
-    keyboard = await get_settings_keyboard(
-        current_model,
-        current_image_gen_model,
-        current_aspect_ratio,
-        current_enhance,
-        web_search_enabled,
-        show_processing_time
-    )
-
-    await bot.edit_message_text(
-        "⚙️Меню настроек:",
-        chat_id=callback_query.message.chat.id,
-        message_id=callback_query.message.message_id,
-        reply_markup=keyboard
-    )
-
-    status_text = "включен" if web_search_enabled else "выключен"
-    await bot.answer_callback_query(callback_query.id, f"Веб-поиск {status_text}")
     await state.set_state(Form.waiting_for_settings_selection)
 
 async def toggle_processing_time_handler(callback_query: types.CallbackQuery, state: FSMContext):
@@ -441,6 +453,7 @@ async def toggle_processing_time_handler(callback_query: types.CallbackQuery, st
     DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
     DEFAULT_ASPECT_RATIO = await def_aspect()
     DEFAULT_ENHANCE = await def_enhance()
+    DEFAULT_VOICE = await def_voice()
     AVAILABLE_MODELS = await av_models()
     current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
     current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
@@ -451,15 +464,17 @@ async def toggle_processing_time_handler(callback_query: types.CallbackQuery, st
         current_image_gen_model = f"{model} ({api})"
     current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
-    web_search_enabled = user_context.get("web_search_enabled", False)
+    current_voice = user_context.get("voice", DEFAULT_VOICE)
+    current_role = user_context.get("system_role", "default")
 
     keyboard = await get_settings_keyboard(
         current_model,
         current_image_gen_model,
         current_aspect_ratio,
         current_enhance,
-        web_search_enabled,
-        show_processing_time  
+        show_processing_time,
+        current_voice,
+        current_role
     )
 
     await bot.edit_message_text(
@@ -470,4 +485,124 @@ async def toggle_processing_time_handler(callback_query: types.CallbackQuery, st
     )
     status_text = "включено" if show_processing_time else "выключено"
     await bot.answer_callback_query(callback_query.id, f"Время обработки {status_text}")
+    await state.set_state(Form.waiting_for_settings_selection)
+
+async def process_voice_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    user_id = callback_query.from_user.id
+    selected_voice = callback_query.data.split("voice_")[1]
+    
+    user_context = await load_context(user_id)
+    user_context["voice"] = selected_voice
+    await save_context(user_id, user_context)
+    
+    DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
+    DEFAULT_ASPECT_RATIO = await def_aspect()
+    DEFAULT_ENHANCE = await def_enhance()
+    DEFAULT_VOICE = await def_voice()
+    
+    AVAILABLE_MODELS = await av_models()
+    current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
+    current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+    if isinstance(current_image_gen_model, dict):
+        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+        model, api = current_image_gen_model.rsplit("_", 1)
+        current_image_gen_model = f"{model} ({api})"
+    current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+    current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
+    show_processing_time = user_context.get("show_processing_time", True)
+    current_voice = user_context.get("voice", DEFAULT_VOICE)
+    current_role = user_context.get("system_role", "default")
+
+    keyboard = await get_settings_keyboard(
+        current_model,
+        current_image_gen_model,
+        current_aspect_ratio,
+        current_enhance,
+        show_processing_time,
+        current_voice,
+        current_role
+    )
+
+    await bot.edit_message_text(
+        "⚙️Меню настроек:",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=keyboard
+    )
+    
+    await bot.answer_callback_query(callback_query.id, f"Выбран голос: {selected_voice}")
+    await state.set_state(Form.waiting_for_settings_selection)
+
+async def role_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    user_id = callback_query.from_user.id
+    selected_role = callback_query.data.split("role_")[1]
+    
+    user_context = await load_context(user_id)
+    api_type = user_context["api_type"]
+    
+    user_context["system_role"] = selected_role
+    
+    if api_type == "gemini":
+        system_prompt = DEFAULT_SYSTEM_PROMPTS.get(selected_role, DEFAULT_SYSTEM_PROMPTS["default"])
+        system_message_found = False
+        for i, msg in enumerate(user_context["messages"]):
+            if msg["role"] == "system" and "parts" in msg:
+                user_context["messages"][i] = {"role": "system", "parts": [{"text": system_prompt}]}
+                system_message_found = True
+                break
+        
+        if not system_message_found:
+            user_context["messages"].insert(0, {"role": "system", "parts": [{"text": system_prompt}]})
+    else:
+        system_prompt = DEFAULT_SYSTEM_PROMPTS.get(selected_role, DEFAULT_SYSTEM_PROMPTS["default"])
+        system_message_found = False
+        for i, msg in enumerate(user_context["messages"]):
+            if msg["role"] == "system" and "content" in msg:
+                user_context["messages"][i] = {"role": "system", "content": system_prompt}
+                system_message_found = True
+                break
+        
+        if not system_message_found:
+            user_context["messages"].insert(0, {"role": "system", "content": system_prompt})
+    
+    await save_context(user_id, user_context)
+    
+    DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
+    DEFAULT_ASPECT_RATIO = await def_aspect()
+    DEFAULT_ENHANCE = await def_enhance()
+    DEFAULT_VOICE = await def_voice()
+    
+    AVAILABLE_MODELS = await av_models()
+    current_model = AVAILABLE_MODELS[user_context["model"]]['model_name']
+    current_image_gen_model = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
+    if isinstance(current_image_gen_model, dict):
+        current_image_gen_model = f"{current_image_gen_model['model_id']} ({current_image_gen_model['api']})"
+    elif isinstance(current_image_gen_model, str) and "_" in current_image_gen_model:
+        model, api = current_image_gen_model.rsplit("_", 1)
+        current_image_gen_model = f"{model} ({api})"
+    current_aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+    current_enhance = user_context.get("enhance", DEFAULT_ENHANCE)
+    show_processing_time = user_context.get("show_processing_time", True)
+    current_voice = user_context.get("voice", DEFAULT_VOICE)
+    current_role = user_context.get("system_role", "default")
+
+    keyboard = await get_settings_keyboard(
+        current_model,
+        current_image_gen_model,
+        current_aspect_ratio,
+        current_enhance,
+        show_processing_time,
+        current_voice,
+        current_role
+    )
+
+    await bot.edit_message_text(
+        "⚙️Меню настроек:",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=keyboard
+    )
+    
+    await bot.answer_callback_query(callback_query.id, f"Роль успешно изменена на: {selected_role}")
     await state.set_state(Form.waiting_for_settings_selection)

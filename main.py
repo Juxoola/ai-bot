@@ -1,5 +1,4 @@
 import logging
-# Configure logging before any imports to prevent overrides
 logging.basicConfig(level=logging.INFO, force=True)
 
 from dotenv import load_dotenv 
@@ -8,8 +7,8 @@ load_dotenv()
 
 import os.path
 from g4f.cookies import set_cookies_dir, read_cookie_files
-from config import Form, bot, dp, init_enhance_prompt_client, update_image_client_for_recognition, openai_clients
-from database import load_context,save_context, is_admin,is_allowed, initialize_database, clear_all_user_contexts, initialize_models, rec_models, whisp_models, def_rec_model, def_gen_model, def_aspect, db_pool, def_enhance, init_all_user_clients, av_models, rec_models
+from config import Form, bot, dp, init_enhance_prompt_client, update_image_client_for_recognition, openai_clients, DEFAULT_SYSTEM_PROMPTS
+from database import load_context,save_context, is_admin,is_allowed, initialize_database, clear_all_user_contexts, initialize_models, rec_models, whisp_models, def_rec_model, def_gen_model, def_aspect, db_pool, def_enhance, init_all_user_clients, av_models, rec_models, def_voice
 
 from keyboards import get_admin_keyboard, get_main_keyboard
 
@@ -22,7 +21,7 @@ from func.messages import handle_all_messages,cmd_long_message,handle_long_messa
 from func.admin import cmd_add_user, cmd_add_model,cmd_add_image_gen_model,cmd_add_image_rec_model,cmd_delete_image_gen_model,cmd_delete_model,cmd_delete_image_rec_model,cmd_remove_user,process_add_user_id,process_remove_user_id,process_new_model_name,process_new_model_id,process_new_model_api,process_confirm_delete,process_delete_model_name,process_new_image_rec_model_id,process_new_image_rec_model_api,process_delete_image_rec_model_name,process_confirm_delete_image_rec_model,process_new_image_gen_model_api,process_new_image_gen_model_id, process_delete_image_gen_model_name,process_confirm_delete_image_gen_model, cmd_send_to_all, cmd_send_to_user, process_message_to_all, process_user_id_to_send, process_message_to_user
 
 
-from settings import cmd_settings, select_model_handler, select_image_gen_model_handler, select_image_rec_model_handler, select_aspect_ratio_handler, process_enhance_selection_handler, close_settings_handler, model_selection_handler, process_image_generation_model_handler, process_image_recognition_model_selection_handler, process_aspect_ratio_selection_handler, toggle_web_search_handler, toggle_processing_time_handler
+from settings import cmd_settings, select_model_handler, select_image_gen_model_handler, select_image_rec_model_handler, select_aspect_ratio_handler, process_enhance_selection_handler, close_settings_handler, model_selection_handler, process_image_generation_model_handler, process_image_recognition_model_selection_handler, process_aspect_ratio_selection_handler, toggle_processing_time_handler, select_role_handler, select_voice_handler, process_voice_selection_handler, role_selection_handler, api_selection_handler
 
 from func.openai_image import process_custom_image_prompt_openai, handle_image_openai
 
@@ -149,7 +148,7 @@ async def process_new_image_rec_model_api_handler(message: types.Message, state:
 async def process_image_edit_instructions_handler(message: types.Message, state: FSMContext):
     instructions = message.text
     await state.update_data(image_edit_instructions=instructions)
-    
+    await state.set_state(Form.waiting_for_message)
     await process_image_editing(message, state)
 
 @dp.message(Form.waiting_for_new_image_gen_model_id)
@@ -178,13 +177,15 @@ async def cmd_start(message: types.Message, state: FSMContext):
     if is_admin(user_id):
         await message.reply(
             "Привет, админ! Я чат-бот, который может использовать различные ИИ-модели.\n"
-            "Используйте /help, чтобы увидеть доступные команды.",
+            "Используйте /help, чтобы увидеть доступные команды.\n"
+            "Если клавиатура пропала, используйте /keyboard для её восстановления.",
             reply_markup=await get_main_keyboard(include_admin_button=True)
         )
     else:
         await message.reply(
             "Привет! Я чат-бот, который может использовать различные ИИ-модели.\n"
-            "Используйте /help, чтобы увидеть доступные команды.",
+            "Используйте /help, чтобы увидеть доступные команды.\n"
+            "Если клавиатура пропала, используйте /keyboard для её восстановления.",
             reply_markup=await get_main_keyboard(include_admin_button=False)
         )
 
@@ -221,7 +222,8 @@ async def cmd_help(message: types.Message, state: FSMContext):
         "/audio - Отправить аудио для транскрипции (Whisper)\n"
         "/search - Выполнить поиск в интернете\n"
         "/long_message - Режим накопления сообщений\n"
-        "Также можно присылать pdf и изображения\n"
+        "/keyboard - Восстановить клавиатуру, если она исчезла\n"
+        "Также можно присылать документы и изображения\n"
     )
     
     await message.reply(help_text)
@@ -302,6 +304,10 @@ async def close_settings_handler_wrapper(callback_query: types.CallbackQuery, st
 async def model_selection_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
     await model_selection_handler(callback_query, state)
 
+@dp.callback_query(Form.waiting_for_api_selection, lambda c: c.data and c.data.startswith('api_'))
+async def api_selection_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+    await api_selection_handler(callback_query, state)
+
 @dp.callback_query(Form.waiting_for_image_generation_model, lambda c: c.data and c.data.startswith('gen_model_'))
 async def process_image_generation_model_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
     await process_image_generation_model_handler(callback_query, state)
@@ -314,14 +320,25 @@ async def process_image_recognition_model_selection_handler_wrapper(callback_que
 async def process_aspect_ratio_selection_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
     await process_aspect_ratio_selection_handler(callback_query, state)
 
-@dp.callback_query(Form.waiting_for_settings_selection, lambda c: c.data == "toggle_web_search")
-async def toggle_web_search_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
-    await toggle_web_search_handler(callback_query, state)
-
 @dp.callback_query(Form.waiting_for_settings_selection, lambda c: c.data == "toggle_processing_time")
 async def toggle_processing_time_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
     await toggle_processing_time_handler(callback_query, state)
 
+@dp.callback_query(Form.waiting_for_settings_selection, lambda c: c.data == "select_voice")
+async def select_voice_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+    await select_voice_handler(callback_query, state)
+
+@dp.callback_query(Form.waiting_for_settings_selection, lambda c: c.data == "select_role")
+async def select_role_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+    await select_role_handler(callback_query, state)
+
+@dp.callback_query(Form.waiting_for_voice_selection, lambda c: c.data and c.data.startswith("voice_"))
+async def process_voice_selection_handler_wrapper(callback_query: types.CallbackQuery, state: FSMContext):
+    await process_voice_selection_handler(callback_query, state)
+
+@dp.callback_query(Form.waiting_for_role_selection, lambda c: c.data and c.data.startswith("role_"))
+async def process_role_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    await role_selection_handler(callback_query, state)
 
 @dp.message(F.text == "🗑️ Очистить")
 @dp.message(F.text == "/clear")
@@ -333,20 +350,30 @@ async def cmd_clear_context(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     user_context = await load_context(user_id)
     api_type = user_context["api_type"]
+    
+    system_role = user_context.get("system_role", "default")
+    system_prompt = DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"])
+    
     new_context = {
         "model": user_context["model"],
         "api_type": api_type,
         "g4f_image": None,
         "g4f_image_base64": None,
         "long_message": "",
-        "web_search_enabled": user_context.get("web_search_enabled", False),
         "image_generation_model": user_context.get("image_generation_model", await def_gen_model()),
         "image_recognition_model": user_context.get("image_recognition_model", await def_rec_model()),
         "aspect_ratio": user_context.get("aspect_ratio", await def_aspect()),
         "enhance": user_context.get("enhance", await def_enhance()),
         "show_processing_time": user_context.get("show_processing_time", True),
-        "messages": [] if api_type == "gemini" else [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]
+        "voice": user_context.get("voice", await def_voice()),
+        "system_role": system_role,
+        "messages": []
     }
+    
+    if api_type == "gemini":
+        new_context["messages"] = [{"role": "system", "parts": [{"text": system_prompt}]}]
+    else:
+        new_context["messages"] = [{"role": "system", "content": system_prompt}]
 
     await save_context(user_id, new_context)
     await message.reply("Контекст очищен.")
@@ -384,6 +411,7 @@ async def process_image_edit_prompt_handler(message: types.Message, state: FSMCo
 @dp.message(Form.waiting_for_image_generation_prompt)
 async def process_image_generation_prompt_handler(message: types.Message, state: FSMContext):
     await state.update_data(image_generation_prompt=message.text)
+    await state.set_state(Form.waiting_for_message)
     await process_image_generation_prompt(message, state)
 
 
@@ -436,12 +464,33 @@ async def cmd_long_message_handler(message: types.Message, state: FSMContext):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
     
-    await cmd_long_message(message, state, is_allowed, is_admin)
+    await cmd_long_message(message, state)
+
+@dp.message(F.text == "⌨️ Вернуть клавиатуру")
+@dp.message(F.text == "/keyboard")
+async def cmd_restore_keyboard(message: types.Message, state: FSMContext):
+    if not is_allowed(message.from_user.id):
+        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    user_id = message.from_user.id
+    
+    if is_admin(user_id):
+        await message.reply(
+            "🔔 Клавиатура восстановлена.",
+            reply_markup=await get_main_keyboard(include_admin_button=True)
+        )
+    else:
+        await message.reply(
+            "🔔 Клавиатура восстановлена.",
+            reply_markup=await get_main_keyboard(include_admin_button=False)
+        )
+    
+    await state.set_state(Form.waiting_for_message)
 
 @dp.message(Form.waiting_for_long_message)
 async def handle_long_message_handler(message: types.Message, state: FSMContext):
     await handle_long_message(message, state)
-
 
 @dp.message()
 async def handle_all_messages_handler(message: types.Message, state: FSMContext):
@@ -462,10 +511,10 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
     
     if message.voice or message.audio:
         if api_type == "poli" and model_id == "openai-audio":
-            await handle_all_messages(message, state, is_admin, is_allowed, audio_response=True)
+            await handle_all_messages(message, state, audio_response=True)
             return
     if message.text and api_type == "poli" and model_id == "openai-audio":
-        await handle_all_messages(message, state, is_admin, is_allowed, audio_response=True)
+        await handle_all_messages(message, state, audio_response=True)
         return
         
     image_rec_models = await rec_models()
@@ -513,7 +562,7 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         return
 
     if current_state == Form.waiting_for_message:
-        await handle_all_messages(message, state, is_admin, is_allowed)
+        await handle_all_messages(message, state)
     elif current_state == Form.waiting_for_image_and_prompt:
         if message.text and api_type == "gemini":
             await process_custom_image_prompt(message, state)
@@ -530,7 +579,9 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         else:
             await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
     else:
-        await handle_all_messages(message, state, is_admin, is_allowed)
+        await handle_all_messages(message, state)
+
+
 
 async def shutdown():
     try:

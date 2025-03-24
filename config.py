@@ -13,8 +13,19 @@ import os
 import logging
 import json
 import importlib
-
+import httpx
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
+
+DEFAULT_SYSTEM_PROMPTS = {
+    "default": "###INSTRUCTIONS### ВСЕГДА ОТВЕЧАЙТЕ ПОЛЬЗОВАТЕЛЮ НА ОСНОВНОМ ЯЗЫКЕ ЕГО СООБЩЕНИЯ. ПРЕДОСТАВЛЯТЬ ПОЛЕЗНУЮ И ТОЧНУЮ ИНФОРМАЦИЮ.",
+    "assistant": "###INSTRUCTIONS### Вы — полезный, уважительный и правдивый ассистент. Отвечайте как можно точнее и информативнее, используя предоставленный контекст. Если вам не хватает информации, признайте это, не придумывайте факты.",
+    "professor": "###INSTRUCTIONS### Вы — профессор с глубокими знаниями в различных областях науки. Отвечайте подробно, используя научную терминологию, приводите факты и исследования. Ваша цель — дать образовательный ответ высокого качества.",
+    "friend": "###INSTRUCTIONS### Ты мой друг, общайся со мной в дружеской, неформальной манере. Используй разговорный стиль, будь эмпатичным и поддерживающим.",
+    "psychologist": "###INSTRUCTIONS### Вы — опытный психолог. Слушайте внимательно, проявляйте эмпатию, задавайте уточняющие вопросы. Давайте поддерживающие, но профессиональные ответы с элементами психологического анализа.",
+    "developer": "###INSTRUCTIONS### Вы — опытный программист. Отвечайте технически точно, приводите фрагменты кода, объясняйте сложные концепции простым языком. Если возможно, давайте несколько решений проблемы.",
+    "poet": "###INSTRUCTIONS### Ты — поэт с изысканным стилем. Отвечай красивым, образным языком, используй метафоры, рифмы и другие поэтические приемы.",
+    "zumer": "###INSTRUCTIONS### ты зумер, отвечай на вопросы в стиле зумера используй смайлики и сленг"
+}
 
 timeout_config_str = os.environ.get("TIMEOUT_CONFIG", '{}')
 try:
@@ -25,18 +36,7 @@ except json.JSONDecodeError:
     TIMEOUT_CONFIG = {"apis": [], "models": {}}
 
 def should_bypass_timeout(model_id, api_type):
-    """
-    Определяет, нужно ли отключить таймаут для заданной комбинации модели и API
-    
-    Args:
-        model_id (str): Идентификатор модели
-        api_type (str): Тип API (например, 'g4f', 'gemini')
-    
-    Returns:
-        bool: True, если таймаут нужно отключить, иначе False
-    """
 
-    # Проверка модели для конкретного API
     api_models = TIMEOUT_CONFIG.get("models", {}).get(api_type, [])
     if model_id in api_models:
         return True
@@ -49,6 +49,7 @@ class Form(StatesGroup):
     waiting_for_message = State()
     waiting_for_settings_selection = State()
     waiting_for_image_recognition_model = State()
+    waiting_for_api_selection = State()
     waiting_for_model_selection = State()
     waiting_for_new_model_name = State()
     waiting_for_new_model_id = State()
@@ -64,6 +65,7 @@ class Form(StatesGroup):
     waiting_for_image_generation_prompt = State()  
     waiting_for_image_generation_model = State() 
     waiting_for_aspect_ratio = State()
+    waiting_for_voice_selection = State()
     waiting_for_add_image_gen_model_name = State() 
     waiting_for_delete_image_gen_model_name = State()  
     waiting_for_confirmation_image_gen_model_delete = State()  
@@ -95,6 +97,7 @@ class Form(StatesGroup):
     waiting_for_image_edit_instructions = State()
     waiting_for_new_image_gen_model_id = State()
     waiting_for_new_image_gen_model_api = State()
+    waiting_for_role_selection = State()
 
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -123,7 +126,7 @@ for provider, cfg in providers_config.items():
     if not api_key or not base_url:
         logging.warning(f"Для провайдера {provider} не задан 'api_key' или 'base_url'. Пропускаем.")
         continue
-    openai_clients[provider] = openai.OpenAI(api_key=api_key, base_url=base_url)
+    openai_clients[provider] = openai.OpenAI(api_key=api_key, base_url=base_url, http_client = httpx.Client(verify=False))
 
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -318,18 +321,19 @@ def get_client(user_id, client_type="g4f_client", model_name=None):
 
 
 enhance_prompt_client = None
+model_name_e = "deepseek-v3"  
 
 async def init_enhance_prompt_client():
     
     global enhance_prompt_client
-    model_name = "llama-3.3-70b"  
-    enhanced_chat_providers = get_supported_providers(chat_providers, model_name)
-    enhanced_image_providers = get_supported_providers(image_providers, model_name)
+    enhanced_chat_providers = get_supported_providers(chat_providers, model_name_e)
+    logging.info(f"Providers {enhanced_chat_providers}")
+    enhanced_image_providers = get_supported_providers(image_providers, model_name_e)
     enhance_prompt_client = Client(
         provider=RetryProvider(enhanced_chat_providers, shuffle=False),
         image_provider=RetryProvider(enhanced_image_providers, shuffle=False)
     )
-    logging.info(f"Enhance prompt client initialized with model {model_name}")
+    logging.info(f"Enhance prompt client initialized with model {model_name_e}")
 
 
 def update_image_gen_client(user_id, image_gen_model):

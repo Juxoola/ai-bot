@@ -16,7 +16,7 @@ FROM python:3.12-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends antiword \
-    libreoffice-writer libmagic-dev && \
+    libreoffice-writer libmagic-dev ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /data && chmod 777 /data

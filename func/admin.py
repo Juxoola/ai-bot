@@ -404,7 +404,6 @@ async def process_delete_image_gen_model_name(callback_query: types.CallbackQuer
         await state.set_state(Form.waiting_for_message)
         return
 
-    # Split model string into model_id and api
     parts = model_data.split("_", 1)
     model_id = parts[0]
     api = parts[1] if len(parts) > 1 else ""

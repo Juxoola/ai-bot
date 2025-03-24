@@ -1,4 +1,4 @@
-from config import bot, g4f_client, get_client,Form, openai_clients
+from config import bot, g4f_client, get_client,Form, openai_clients, DEFAULT_SYSTEM_PROMPTS
 import config
 from key import GEMINI_API_KEY
 from aiogram.fsm.context import FSMContext
@@ -18,12 +18,9 @@ from google.genai import types as genai_types
 from datetime import timedelta
 import time
 from PIL import Image
-import base64
+from .messages import DEFAULT_API_TIMEOUT
 import requests
-import multiprocessing
-import queue
-import threading
-
+from config import model_name_e
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
 google_ai_models = ["gemini-2.0-flash-exp"]
@@ -88,7 +85,15 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         "9:16": (1024, 1792),
         "21:9": (2048, 896),
         "9:21": (896, 2048),
-        "2:2": (1024, 1024),
+        "1:1(2)": (1024, 1024),
+        "3:2(2)": (2496, 1664),
+        "2:3(2)": (1664, 2496),
+        "4:3(2)": (2304, 1856),
+        "3:4(2)": (1856, 2304),
+        "16:9(2)": (2752, 1536),
+        "9:16(2)": (1536, 2752),
+        "21:9(2)": (3136, 1344),
+        "9:21(2)": (1344, 3136),
     }
     width, height = aspect_ratio_options.get(aspect_ratio, (1024, 1024)) 
 
@@ -100,7 +105,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             improved_prompt = await asyncio.to_thread(
                 lambda:
                     config.enhance_prompt_client.chat.completions.create(
-                        model="llama-3.3-70b",
+                        model=model_name_e,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
@@ -112,65 +117,49 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             logging.error(f"Error during prompt improvement: {e}")
             await bot.send_message(user_id, f"🚨Ошибка при улучшении промпта: {e}")
     if api_type == "poli":
-        async def fetch_image():
-            encoded_prompt = quote(prompt)
-            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-            api_model_name = model_id 
-            params = {
-                "width": width,
-                "height": height,
-                "enhance": "false", 
-                "model": api_model_name,
-                "seed": random.randint(0, 1000000),
-                "nologo": "true",
-                "private": "true",
-                "safe": "false"
-            }
+        def fetch_image():
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, params=params) as response:
-                        if response.status == 200:
-                            image_data = await response.read()
-                            return image_data
-                        else:
-                            error_message = await response.text()
-                            return response.status, error_message 
+                encoded_prompt = quote(prompt)
+                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+                api_model_name = model_id 
+                params = {
+                    "width": width,
+                    "height": height,
+                    "enhance": "false",
+                    "model": api_model_name,
+                    "seed": random.randint(0, 1000000),
+                    "nologo": "true",
+                    "private": "true",
+                    "safe": "false"
+                }
+                response = requests.get(url, params=params)
+                response.raise_for_status()
+                return response.content
             except Exception as e:
                 logging.error(f"Error during image generation: {e}")
                 raise e
+
         retry_count = 0
         max_retries = 3
         while retry_count < max_retries:
             try:
-                result = await asyncio.to_thread(lambda: asyncio.run(fetch_image()))
-                if isinstance(result, tuple) and result[0] == 500: 
-                    status_code, error_message = result
-                    retry_count += 1
-                    await bot.send_message(
-                        user_id, f"⚠️ Ошибка 500 при генерации изображения. Попытка {retry_count}/{max_retries}..."
-                    )
-                    if retry_count == max_retries:
-                        await bot.send_message(
-                            user_id, f"🚨 Не удалось сгенерировать изображение после {max_retries} попыток. Ошибка: {error_message}"
-                        )
-                        break 
-                    await asyncio.sleep(1) 
-                else:
-                    image_data = result
-                    caption = f"Фото сгенерировано моделью {model_id}"
-                    if aspect_ratio:
-                        caption += f" с соотношением сторон {aspect_ratio}"
-                    if enhance:
-                        caption += f", enhance: {enhance}"
-                    caption += ":"
-                    await bot.send_photo(
-                        user_id,
-                        photo=types.BufferedInputFile(image_data, filename="image.jpg"),
-                        caption=caption,
-                    )
-                    caption2 = "Фото без сжатия"
-                    await bot.send_document(user_id, document=types.BufferedInputFile(image_data, filename="image.jpg"), caption=caption2)
-                    break
+                result = await async_run_with_timeout(fetch_image, DEFAULT_API_TIMEOUT)
+                
+                image_data = result
+                caption = f"Фото сгенерировано моделью {model_id}"
+                if aspect_ratio:
+                    caption += f" с соотношением сторон {aspect_ratio}"
+                if enhance:
+                    caption += f", enhance: {enhance}"
+                caption += ":"
+                await bot.send_photo(
+                    user_id,
+                    photo=types.BufferedInputFile(image_data, filename="image.jpg"),
+                    caption=caption,
+                )
+                caption2 = "Фото без сжатия"
+                await bot.send_document(user_id, document=types.BufferedInputFile(image_data, filename="image.jpg"), caption=caption2)
+                break
             except Exception as e:
                 await bot.send_message(
                     user_id, f"🚨Ошибка во время генерации изображения: {e}"
@@ -181,14 +170,15 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         client = openai_clients.get(api_type)
         try:
             size_str = f"{width}x{height}"
-            response = await async_run_with_timeout(
-                lambda: client.images.generate(
+            def generate_openai_content():
+                return client.images.generate(
                     model=model_id,
                     prompt=prompt,
                     size=size_str
-                ),
-                timeout=60
-            )
+                )
+            
+            response = await async_run_with_timeout(generate_openai_content, DEFAULT_API_TIMEOUT)
+
             if response is None:
                 return
             if hasattr(response, 'generated_images'):
@@ -227,16 +217,16 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     elif api_type == "gemini":
         if genai_client:
             try:
-                response = asyncio.to_thread(
-                    lambda: genai_client.models.generate_content(
+                def generate_gemini_content():
+                    return genai_client.models.generate_content(
                         model=model_id,
                         contents=prompt,
                         config=genai_types.GenerateContentConfig(
                             response_modalities=['Text', 'Image']
                         )
                     )
-                )
                 
+                response = await async_run_with_timeout(generate_gemini_content, DEFAULT_API_TIMEOUT)
                 
                 if response is None:
                     return
@@ -286,7 +276,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         image_gen_client = get_client(user_id, "g4f_image_gen_client", model_name=model_id)
     
         try:
-            response = await async_run_with_timeout(
+            def generate_g4f_content():
                 lambda: image_gen_client.images.generate(
                     prompt=prompt,
                     model=model_id,
@@ -295,10 +285,10 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     private=True,
                     width=width,
                     height=height,
-                ),
-                timeout=60
-            )
-    
+                )
+            
+            response = await async_run_with_timeout(generate_g4f_content, DEFAULT_API_TIMEOUT)
+            
             if response is None:
                 return
             
@@ -585,16 +575,16 @@ async def process_image_editing(message: types.Message, state: FSMContext):
     
             contents = [instructions, *pil_images]
     
-            response = asyncio.to_thread(
-                lambda: genai_client.models.generate_content(
+            def generate_gemini_content():
+                return genai_client.models.generate_content(
                     model=model_id,
                     contents=contents,
                     config=genai_types.GenerateContentConfig(
                         response_modalities=['Text', 'Image']
                     )
                 )
-            )
             
+            response = await async_run_with_timeout(generate_gemini_content, DEFAULT_API_TIMEOUT)
             
             if response is None:
                 await bot.send_message(

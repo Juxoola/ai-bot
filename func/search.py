@@ -1,5 +1,5 @@
 from aiogram.fsm.context import FSMContext
-from config import  get_client, Form, openai_clients
+from config import  get_client, Form, openai_clients, DEFAULT_SYSTEM_PROMPTS
 from func.messages import fix_markdown, send_message_in_parts
 from database import load_context, save_context, av_models
 from aiogram import types
@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 import spacy
 from concurrent.futures import ThreadPoolExecutor
 import google.generativeai as genai
-from .messages import call_openai_completion_sync, async_run_with_timeout
+from .messages import call_openai_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT
 
 DEFAULT_INSTRUCTIONS = """
 Using the provided web search results, to write a comprehensive reply to the user request.
@@ -254,7 +254,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
 {str(search_results)}
 
 Инструкция: Используя предоставленные результаты веб-поиска, напишите развернутый ответ на запрос пользователя.
-Обязательно добавьте источники цитирования, используя обозначение [[Number]](Url) после ссылки. Пример: [[0]](http://google.com)
+Обязательно добавьте источники цитирования, используя обозначение [Number](Url) после ссылки. Пример: [0](http://google.com)
 
 Запрос пользователя:
 {query}
@@ -272,11 +272,11 @@ async def process_search_query(message: types.Message, state: FSMContext):
             try:
                 result = await async_run_with_timeout(
                     lambda: call_openai_completion_sync(api_type, model_id, user_context["messages"]),
-                    60
+                    DEFAULT_API_TIMEOUT
                 )
             except TimeoutError as e:
                 logging.error(f"Timeout in openai_client request (long message): {e}")
-                await message.reply("🕒 Превышено время ожидания ответа (60 сек). Попробуйте еще раз или выберите другую модель.")
+                await message.reply("🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT}. Попробуйте еще раз или выберите другую модель.")
                 result = None
 
             if result:
@@ -291,10 +291,10 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 )
 
             try:
-                response = await async_run_with_timeout(g4f_request, 60)
+                response = await async_run_with_timeout(g4f_request, DEFAULT_API_TIMEOUT)
             except TimeoutError as e:
                 logging.error(f"Timeout in g4f_image_request (long message): {e}")
-                await message.reply(f"🕒 Превышено время ожидания ответа (60 сек). Попробуйте еще раз или выберите другую модель.")
+                await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
                 response = None
 
             if response:
@@ -302,14 +302,36 @@ async def process_search_query(message: types.Message, state: FSMContext):
 
         elif api_type == "gemini":
             async def gemini_request():
-                gemini_model = genai.GenerativeModel(model_id)
-                return gemini_model.generate_content(user_context["messages"])
+                system_instruction = None
+                messages_for_model = []
+                
+                for msg in user_context["messages"]:
+                    if msg["role"] == "system" and "parts" in msg and msg["parts"]:
+                        system_text = msg["parts"][0].get("text", "")
+                        if system_text:
+                            system_instruction = system_text
+                    else:
+                        messages_for_model.append(msg)
+                
+                if not system_instruction:
+                    system_instruction = DEFAULT_SYSTEM_PROMPTS["default"]
+                
+                if system_instruction:
+                    from google.genai import types as genai_types
+                    gemini_model = genai.GenerativeModel(
+                        model_id,
+                        system_instruction=system_instruction
+                    )
+                else:
+                    gemini_model = genai.GenerativeModel(model_id)
+                
+                return gemini_model.generate_content(messages_for_model)
 
             try:
-                response = await async_run_with_timeout(gemini_request, 60)
+                response = await async_run_with_timeout(gemini_request, DEFAULT_API_TIMEOUT)
             except TimeoutError as e:
                 logging.error(f"Timeout in gemini_request (long message): {e}")
-                await message.reply("🕒 Превышено время ожидания ответа (60 сек). Попробуйте еще раз или выберите другую модель.")
+                await message.reply("🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT}). Попробуйте еще раз или выберите другую модель.")
                 response = None
             
             if response:

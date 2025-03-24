@@ -5,9 +5,11 @@ from aiogram import types
 from aiogram.fsm.context import FSMContext
 from config import Form, get_openai_client, bot
 from database import load_context, save_context
-from .messages import call_openai_completion_sync, async_run_with_timeout
-
+from .messages import call_openai_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT
+import time
+from datetime import timedelta
 async def process_image_with_openai(message: types.Message, state: FSMContext, prompt: str):
+    start_time = time.time()
 
     user_id = message.from_user.id
     user_context = await load_context(user_id)
@@ -42,7 +44,7 @@ async def process_image_with_openai(message: types.Message, state: FSMContext, p
     try:
         completion = await async_run_with_timeout(
             call_openai_completion_sync,
-            60,
+            DEFAULT_API_TIMEOUT,
             api_type, 
             model, 
             messages_payload
@@ -58,6 +60,14 @@ async def process_image_with_openai(message: types.Message, state: FSMContext, p
         await save_context(user_id, user_context)
 
         await message.reply(response_text)
+
+        end_time = time.time()
+        processing_time = end_time - start_time
+        formatted_processing_time = str(timedelta(seconds=int(processing_time)))
+        service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
+
+        if user_context.get("show_processing_time", True):
+            await bot.send_message(user_id, service_info)
 
     except Exception as e:
         logging.error(f"Error during OpenAI image processing: {e}")

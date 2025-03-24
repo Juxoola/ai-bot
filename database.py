@@ -7,7 +7,7 @@ import asyncio
 from collections import deque
 from contextlib import asynccontextmanager
 import os
-from config import openai_clients
+from config import openai_clients, DEFAULT_SYSTEM_PROMPTS
 import time
 from cachetools import TTLCache, LRUCache
 import logging
@@ -98,6 +98,23 @@ DEFAULT_IMAGE_RECOGNITION_MODEL = "gemini-2.0-flash"
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
 DEFAULT_ASPECT_RATIO = "1:1"
 DEFAULT_ENHANCE = True
+
+AVAILABLE_VOICES = [
+    "alloy",
+    "echo",
+    "fable",
+    "onyx",
+    "nova",
+    "shimmer",
+    "coral",
+    "verse",
+    "ballad",
+    "ash",
+    "sage",
+    "amuch",
+    "dan"
+]
+DEFAULT_VOICE = "alloy"
 
 user_context_cache = TTLCache(maxsize=2000, ttl=300)  # 5 минут
 
@@ -286,17 +303,20 @@ async def initialize_database():
                 api_type TEXT,
                 g4f_image_base64 TEXT,
                 long_message TEXT,
-                web_search_enabled INTEGER,
                 image_generation_model TEXT,
                 aspect_ratio TEXT,
                 enhance INTEGER,
-                show_processing_time INTEGER
+                show_processing_time INTEGER,
+                voice TEXT DEFAULT 'alloy',
+                system_role TEXT DEFAULT 'default'
             )
             """
         )
         async with db.execute("PRAGMA table_info(user_contexts)") as cursor:
             columns = [row[1] for row in await cursor.fetchall()]
 
+        if "system_role" not in columns:
+            await db.execute("ALTER TABLE user_contexts ADD COLUMN system_role TEXT DEFAULT 'default'")
 
         await db.commit()
 
@@ -391,21 +411,40 @@ async def initialize_database():
         await optimize_database()
 
 async def clear_all_user_contexts():
-    """
-    Очищает поля messages, long_message и g4f_image_base64 в таблице user_contexts при запуске бота.
-    """
+
     async with get_db_connection() as db:
-        await db.execute(
-            """
-            UPDATE user_contexts
-            SET messages = CASE
-                WHEN api_type = 'gemini' THEN '[]'
-                ELSE '[{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}]'
-            END,
-            long_message = '',
-            g4f_image_base64 = NULL
-            """
-        )
+        user_data = []
+        async with db.execute("SELECT user_id, api_type, system_role FROM user_contexts") as cursor:
+            async for row in cursor:
+                user_data.append({
+                    "user_id": row[0],
+                    "api_type": row[1],
+                    "system_role": row[2] if row[2] else "default"
+                })
+        
+        for user in user_data:
+            user_id = user["user_id"]
+            api_type = user["api_type"]
+            system_role = user["system_role"]
+            
+            system_prompt = DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"])
+            
+            if api_type == "gemini":
+                messages = json.dumps([{"role": "system", "parts": [{"text": system_prompt}]}])
+            else:
+                messages = json.dumps([{"role": "system", "content": system_prompt}])
+            
+            await db.execute(
+                """
+                UPDATE user_contexts
+                SET messages = ?,
+                    long_message = '',
+                    g4f_image_base64 = NULL
+                WHERE user_id = ?
+                """,
+                (messages, user_id)
+            )
+        
         await db.commit()
         
 async def load_context(user_id):
@@ -415,7 +454,7 @@ async def load_context(user_id):
     
     async with get_db_connection() as db:
         async with db.execute(
-            "SELECT model, messages, api_type, g4f_image_base64, long_message, web_search_enabled, image_generation_model, aspect_ratio, enhance, show_processing_time FROM user_contexts WHERE user_id = ?",
+            "SELECT model, messages, api_type, g4f_image_base64, long_message, image_generation_model, aspect_ratio, enhance, show_processing_time, voice, system_role FROM user_contexts WHERE user_id = ?",
             (user_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -426,12 +465,12 @@ async def load_context(user_id):
                     "api_type": row[2],
                     "g4f_image": BytesIO(base64.b64decode(row[3])) if row[3] else None,
                     "long_message": row[4],
-                    "web_search_enabled": bool(row[5]),
-                    "image_generation_model": row[6],
-                    "aspect_ratio": row[7],
-                    "enhance": bool(row[8]),
-                    "show_processing_time": bool(row[9])
-
+                    "image_generation_model": row[5],
+                    "aspect_ratio": row[6],
+                    "enhance": bool(row[7]),
+                    "show_processing_time": bool(row[8]),
+                    "voice": row[9] if row[9] else DEFAULT_VOICE,
+                    "system_role": row[10] if row[10] else "default"
                 }
                 user_context_cache[cache_key] = context
                 return context
@@ -442,18 +481,23 @@ async def load_context(user_id):
                     model_id = model_row[0] if model_row else DEFAULT_MODEL
                     api_type = model_row[1] if model_row else AVAILABLE_MODELS[f"{DEFAULT_MODEL}_g4f"]["api"]
 
+                if api_type == "gemini":
+                    system_message = [{"role": "system", "parts": [{"text": DEFAULT_SYSTEM_PROMPTS["default"]}]}]
+                elif api_type in allowed_apis:
+                    system_message = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPTS["default"]}]
+               
                 context = {
                     "model": f"{model_id}_{api_type}", 
-                    "messages": [{"role": "system", "content": "###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE."}] if api_type in allowed_apis else [],
+                    "messages": system_message,
                     "api_type": api_type,
                     "g4f_image": None,
                     "long_message": "",
-                    "web_search_enabled": False,
                     "image_generation_model": DEFAULT_IMAGE_GEN_MODEL,
                     "aspect_ratio": DEFAULT_ASPECT_RATIO,
                     "enhance": True,
-                    "show_processing_time": False 
-
+                    "show_processing_time": False,
+                    "voice": DEFAULT_VOICE,
+                    "system_role": "default"
                 }
                 await save_context(user_id, context)
                 
@@ -504,9 +548,9 @@ async def save_context(user_id, context):
                     """
                     REPLACE INTO user_contexts (
                         user_id, model, messages, api_type, g4f_image_base64,
-                        long_message, web_search_enabled, image_generation_model, 
-                        aspect_ratio, enhance, show_processing_time
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        long_message, image_generation_model, 
+                        aspect_ratio, enhance, show_processing_time, voice, system_role
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
@@ -515,11 +559,12 @@ async def save_context(user_id, context):
                         context_to_save["api_type"],
                         context_to_save["g4f_image_base64"],
                         context_to_save["long_message"],
-                        int(context_to_save["web_search_enabled"]),
                         context_to_save["image_generation_model"],
                         context_to_save["aspect_ratio"],
                         int(context_to_save["enhance"]),
-                        int(context_to_save.get("show_processing_time", True))
+                        int(context_to_save.get("show_processing_time", True)),
+                        context_to_save.get("voice", DEFAULT_VOICE),
+                        context_to_save.get("system_role", "default")
                     ),
                 )
                 await db.commit()
@@ -717,6 +762,12 @@ async def whisp_models():
 
 async def def_enhance():
     return DEFAULT_ENHANCE
+
+async def def_voice():
+    return DEFAULT_VOICE
+
+async def av_voices():
+    return AVAILABLE_VOICES
 
 async def init_av_models():
     global AVAILABLE_MODELS
