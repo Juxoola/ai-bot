@@ -249,7 +249,9 @@ async def cmd_delete_image_rec_model(message: types.Message, state: FSMContext):
         return
 
     IMAGE_RECOGNITION_MODELS = await rec_models()
-    keyboard = await get_image_recognition_model_selection_keyboard(IMAGE_RECOGNITION_MODELS)
+    keyboard, model_map = await get_image_recognition_model_selection_keyboard(IMAGE_RECOGNITION_MODELS)
+    
+    await state.update_data(image_rec_model_map=model_map)
 
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete_image_rec")])
 
@@ -258,9 +260,23 @@ async def cmd_delete_image_rec_model(message: types.Message, state: FSMContext):
     await state.set_state(Form.waiting_for_delete_image_rec_model_name)
 
 async def process_delete_image_rec_model_name(callback_query: types.CallbackQuery, state: FSMContext):
-    model_data = callback_query.data.split('_', 2)[2] if callback_query.data.startswith('rec_model_') else callback_query.data
+    if callback_query.data == "cancel_delete_image_rec":
+        await bot.send_message(callback_query.from_user.id, "Удаление модели распознавания изображений отменено.")
+        await state.set_state(Form.waiting_for_message)
+        return
     
     data = await state.get_data()
+    model_map = data.get("image_rec_model_map", {})
+    
+    short_id = callback_query.data.split('_', 2)[2] if callback_query.data.startswith('rec_model_') else callback_query.data
+    
+    if short_id not in model_map:
+        await bot.send_message(callback_query.from_user.id, "Модель не найдена. Попробуйте снова /delete_image_rec_model")
+        await state.set_state(Form.waiting_for_message)
+        return
+        
+    model_key = model_map[short_id]
+    
     delete_image_rec_model_message_id = data.get("delete_image_rec_model_message_id")
     if delete_image_rec_model_message_id:
         try:
@@ -268,18 +284,13 @@ async def process_delete_image_rec_model_name(callback_query: types.CallbackQuer
         except Exception as e:
             logging.error(f"Ошибка при удалении сообщения выбора модели для удаления: {e}")
 
-    if model_data == "cancel_delete_image_rec":
-        await bot.send_message(callback_query.from_user.id, "Удаление модели распознавания изображений отменено.")
-        await state.set_state(Form.waiting_for_message)
-        return
-
     IMAGE_RECOGNITION_MODELS = await rec_models()
-    if model_data not in IMAGE_RECOGNITION_MODELS:
-        await bot.send_message(callback_query.from_user.id, "Модель не найдена.")
+    if model_key not in IMAGE_RECOGNITION_MODELS:
+        await bot.send_message(callback_query.from_user.id, "Модель не найдена в базе данных.")
         await state.set_state(Form.waiting_for_message)
         return
 
-    model_id, api = model_data.split('_', 1)
+    model_id, api = model_key.split('_', 1)
     
     await state.update_data(
         delete_image_rec_model_id=model_id,
@@ -380,7 +391,9 @@ async def cmd_delete_image_gen_model(message: types.Message, state: FSMContext):
         return
 
     IMAGE_GENERATION_MODELS = await gen_models()
-    keyboard = await get_image_gen_model_selection_keyboard(IMAGE_GENERATION_MODELS)
+    keyboard, model_map = await get_image_gen_model_selection_keyboard(IMAGE_GENERATION_MODELS)
+    
+    await state.update_data(image_gen_model_map=model_map)
 
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete_image_gen")])
 
@@ -389,9 +402,23 @@ async def cmd_delete_image_gen_model(message: types.Message, state: FSMContext):
     await state.set_state(Form.waiting_for_delete_image_gen_model_name)
 
 async def process_delete_image_gen_model_name(callback_query: types.CallbackQuery, state: FSMContext):
-    model_data = callback_query.data.split('_', 2)[2] if callback_query.data.startswith('gen_model_') else callback_query.data
-
+    if callback_query.data == "cancel_delete_image_gen":
+        await bot.send_message(callback_query.from_user.id, "Удаление модели для генерации изображений отменено.")
+        await state.set_state(Form.waiting_for_message)
+        return
+    
     data = await state.get_data()
+    model_map = data.get("image_gen_model_map", {})
+    
+    short_id = callback_query.data.split('_', 2)[2] if callback_query.data.startswith('gen_model_') else callback_query.data
+    
+    if short_id not in model_map:
+        await bot.send_message(callback_query.from_user.id, "Модель не найдена. Попробуйте снова /delete_image_gen_model")
+        await state.set_state(Form.waiting_for_message)
+        return
+        
+    model_key = model_map[short_id]
+
     delete_image_gen_model_message_id = data.get("delete_image_gen_model_message_id")
     if delete_image_gen_model_message_id:
         try:
@@ -399,15 +426,8 @@ async def process_delete_image_gen_model_name(callback_query: types.CallbackQuer
         except Exception as e:
             logging.error(f"Ошибка при удалении сообщения выбора модели для удаления: {e}")
 
-    if model_data == "cancel_delete_image_gen":
-        await bot.send_message(callback_query.from_user.id, "Удаление модели для генерации изображений отменено.")
-        await state.set_state(Form.waiting_for_message)
-        return
-
-    parts = model_data.split("_", 1)
-    model_id = parts[0]
-    api = parts[1] if len(parts) > 1 else ""
-
+    model_id, api = model_key.split('_', 1)
+    
     await state.update_data(delete_image_gen_model_id=model_id, delete_image_gen_model_api=api)
     await bot.send_message(callback_query.from_user.id,
                          f"Вы уверены, что хотите удалить модель '{model_id}' (API: {api}) для генерации изображений? (да/нет)",

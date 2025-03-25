@@ -1,34 +1,20 @@
 from aiogram.fsm.context import FSMContext
-from config import  get_client, Form, openai_clients, DEFAULT_SYSTEM_PROMPTS
+from config import get_client, Form, openai_clients, DEFAULT_SYSTEM_PROMPTS
 from func.messages import fix_markdown, send_message_in_parts
-from database import load_context, save_context, av_models
+from database import load_context, save_context
 from aiogram import types
 import asyncio
 import logging
 from aiogram.enums import ParseMode
-from googlesearch import search as google_search
 from bs4 import BeautifulSoup
 from aiohttp import ClientSession, ClientTimeout, ClientError
-import json
-import hashlib
-from pathlib import Path
-from urllib.parse import urlparse, quote_plus
-from datetime import datetime
-import datetime
+from urllib.parse import urlparse
 from typing import Iterator
 import os
 from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import DuckDuckGoSearchException
-from bs4 import BeautifulSoup
-import spacy
-from concurrent.futures import ThreadPoolExecutor
 import google.generativeai as genai
 from .messages import call_openai_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT
-
-DEFAULT_INSTRUCTIONS = """
-Using the provided web search results, to write a comprehensive reply to the user request.
-Make sure to add the sources of cites using [[Number]](Url) notation after the reference. Example: [[0]](http://google.com)
-"""
 
 class SearchResults():
     def __init__(self, results: list, used_words: int):
@@ -61,9 +47,6 @@ class SearchResultEntry():
         self.snippet = snippet
         self.text = text
 
-    def set_text(self, text: str):
-        self.text = text
-        
 def scrape_text(html: str, max_words: int = None, add_source=True, count_images: int = 2) -> Iterator[str]:
     source = BeautifulSoup(html, "html.parser")
     soup = source
@@ -179,63 +162,6 @@ async def search(query: str, max_results: int = 5, max_words: int = 2500, backen
             return SearchResults(formatted_results, used_words)
     except:
         return SearchResults([], 0)
-
-async def do_search(prompt: str, query: str = None, instructions: str = DEFAULT_INSTRUCTIONS, **kwargs) -> str:
-    if query is None:
-        try:
-            query = spacy_get_keywords(prompt)
-        except:
-            query = prompt
-    search_results = await search(query, **kwargs)
-
-    if instructions:
-        new_prompt = f"""
-{search_results}
-
-Instruction: {instructions}
-
-User request:
-{prompt}
-"""
-    else:
-        new_prompt = f"""
-{search_results}
-
-{prompt}
-"""
-    return new_prompt
-
-def get_search_message(prompt: str, raise_search_exceptions=False, **kwargs) -> str:
-    try:
-        return asyncio.run(do_search(prompt, **kwargs))
-    except (Exception) as e:
-        if raise_search_exceptions:
-            raise e
-        print(f"Couldn't do web search: {e.__class__.__name__}: {e}")
-        return prompt
-
-def spacy_get_keywords(text: str):
-    try:
-        nlp = spacy.load("en_core_web_sm")
-
-        doc = nlp(text)
-
-        keywords = []
-        for token in doc:
-            if token.pos_ in {"NOUN", "PROPN", "ADJ"} and not token.is_stop:
-                keywords.append(token.lemma_)
-
-        for ent in doc.ents:
-            keywords.append(ent.text)
-
-        keywords = list(set(keywords))
-
-        keywords = [chunk.text for chunk in doc.noun_chunks if not chunk.root.is_stop]
-
-        return keywords
-    except:
-        return text
-        
 
 async def process_search_query(message: types.Message, state: FSMContext):
     query = message.text

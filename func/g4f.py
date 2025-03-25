@@ -1,4 +1,4 @@
-from config import bot, g4f_client, get_client,Form, openai_clients, DEFAULT_SYSTEM_PROMPTS
+from config import bot, g4f_client, get_client,Form, openai_clients, DEFAULT_SYSTEM_PROMPTS, model_name_e
 import config
 from key import GEMINI_API_KEY
 from aiogram.fsm.context import FSMContext
@@ -20,7 +20,8 @@ import time
 from PIL import Image
 from .messages import DEFAULT_API_TIMEOUT
 import requests
-from config import model_name_e
+from deep_translator import GoogleTranslator
+
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
 google_ai_models = ["gemini-2.0-flash-exp"]
@@ -97,6 +98,24 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     }
     width, height = aspect_ratio_options.get(aspect_ratio, (1024, 1024)) 
 
+    if not enhance:
+        try:
+            translator = GoogleTranslator(source='auto', target='en')
+            
+            translated_prompt = await asyncio.to_thread(
+                lambda: translator.translate(prompt)
+            )
+            
+            if translated_prompt and translated_prompt != prompt:
+                original_prompt = prompt
+                prompt = translated_prompt
+                await bot.send_message(
+                    user_id, 
+                    f"🔔 Ваш запрос был переведен на английский для лучших результатов:\n'{original_prompt}' → '{prompt}'"
+                )
+        except Exception as e:
+            logging.error(f"Error during prompt translation: {e}")
+            await bot.send_message(user_id, f"⚠️ Не удалось перевести запрос на английский: {e}")
 
     # Улучшение промпта для всех моделей, если enhance=True
     if enhance:
@@ -540,6 +559,8 @@ async def process_image_editing(message: types.Message, state: FSMContext):
         await state.set_state(Form.waiting_for_message)
         return
     
+    
+
     user_context = await load_context(user_id)
     model_info = user_context.get("image_generation_model")
     
@@ -572,9 +593,27 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 image_bytes.seek(0)
                 pil_img = await asyncio.to_thread(lambda: Image.open(image_bytes))
                 pil_images = [pil_img]
+
+            try:
+                translator = GoogleTranslator(source='auto', target='en')
+                
+                translated_prompt = await asyncio.to_thread(
+                    lambda: translator.translate(instructions)
+                )
+                
+                if translated_prompt and translated_prompt != instructions:
+                    original_prompt = instructions
+                    instructions = translated_prompt
+                    await bot.send_message(
+                        user_id, 
+                        f"🔔 Ваш запрос был переведен на английский для лучших результатов:\n'{original_prompt}' → '{instructions}'"
+                    )
+            except Exception as e:
+                logging.error(f"Error during prompt translation: {e}")
+                await bot.send_message(user_id, f"⚠️ Не удалось перевести запрос на английский: {e}")
     
             contents = [instructions, *pil_images]
-    
+
             def generate_gemini_content():
                 return genai_client.models.generate_content(
                     model=model_id,

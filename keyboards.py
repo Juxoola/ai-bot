@@ -45,6 +45,7 @@ async def get_main_keyboard(include_admin_button=False):
             KeyboardButton(text="📝 Длинное сообщение")
         ],
         [
+            KeyboardButton(text="🎭 Мем"),
             KeyboardButton(text="ℹ️ Помощь")
         ]
     ]
@@ -115,12 +116,10 @@ async def get_api_selection_keyboard(available_models):
     priority_api_order_str = os.environ.get("PRIORITY_API_ORDER", "gemini,g4f,glhf,openrouter")
     priority_api_order = [api.strip() for api in priority_api_order_str.split(",")]
     
-    # Gather all available APIs
     api_types = set()
     for model_data in available_models.values():
         api_types.add(model_data["api"])
     
-    # Display APIs in priority order first
     buttons_row = []
     for api_type in priority_api_order:
         if api_type in api_types:
@@ -131,7 +130,6 @@ async def get_api_selection_keyboard(available_models):
                 keyboard.inline_keyboard.append(buttons_row)
                 buttons_row = []
     
-    # Display remaining APIs alphabetically
     for api_type in sorted(api_types):
         button = InlineKeyboardButton(text=api_type.upper(), callback_data=f"api_{api_type}")
         buttons_row.append(button)
@@ -150,16 +148,13 @@ async def get_models_by_api_keyboard(available_models, selected_api):
         [InlineKeyboardButton(text=f"----- Модели {selected_api.upper()} -----", callback_data="ignore")]
     )
     
-    # Filter models by selected API
     api_models = []
     for model_id, model_data in available_models.items():
         if model_data["api"] == selected_api:
             api_models.append((model_id, model_data["model_name"]))
     
-    # Sort models by name
     api_models.sort(key=lambda x: x[1])
     
-    # Create buttons for models
     buttons_row = []
     for model_id, model_name in api_models:
         button = InlineKeyboardButton(text=model_name, callback_data=f"model_{model_id}")
@@ -180,11 +175,20 @@ async def get_image_gen_model_selection_keyboard(IMAGE_GENERATION_MODELS):
     )
     buttons_row = []
     
+    model_map = {}
+    counter = 1
+    
     for model in IMAGE_GENERATION_MODELS:
+        short_id = f"g{counter}"
         model_id = model["model_id"]
         api = model["api"]
+        
+        model_key = f"{model_id}_{api}"
+        model_map[short_id] = model_key
+        counter += 1
+        
         display_text = f"{model_id} ({api})"
-        button = InlineKeyboardButton(text=display_text, callback_data=f"gen_model_{model_id}_{api}")
+        button = InlineKeyboardButton(text=display_text, callback_data=f"gen_model_{short_id}")
         buttons_row.append(button)
         if len(buttons_row) == 2:
             keyboard.inline_keyboard.append(buttons_row)
@@ -193,7 +197,7 @@ async def get_image_gen_model_selection_keyboard(IMAGE_GENERATION_MODELS):
     if buttons_row:
         keyboard.inline_keyboard.append(buttons_row)
     
-    return keyboard
+    return keyboard, model_map
 
 async def get_image_recognition_model_selection_keyboard(IMAGE_RECOGNITION_MODELS):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
@@ -201,20 +205,31 @@ async def get_image_recognition_model_selection_keyboard(IMAGE_RECOGNITION_MODEL
         [InlineKeyboardButton(text=f"----- Модели для распознавания изображений -----", callback_data="ignore")]
     )
     buttons_row = []
-    for model_name in IMAGE_RECOGNITION_MODELS:
-        callback_data = f"rec_model_{model_name}" 
-        if len(callback_data.encode('utf-8')) > 64:
-            raise ValueError(f"Callback data too long: {callback_data}")
+    
+    model_map = {}
+    counter = 1
+    
+    for model_key in IMAGE_RECOGNITION_MODELS:
+        short_id = f"r{counter}"
+        model_map[short_id] = model_key
+        counter += 1
         
-        button = InlineKeyboardButton(text=model_name, callback_data=callback_data)
+        model_data = IMAGE_RECOGNITION_MODELS[model_key]
+        model_id = model_data["model_id"]
+        api = model_data["api"]
+        display_text = f"{model_id} ({api})"
+        
+        callback_data = f"rec_model_{short_id}"
+        button = InlineKeyboardButton(text=display_text, callback_data=callback_data)
         buttons_row.append(button)
         if len(buttons_row) == 2:
             keyboard.inline_keyboard.append(buttons_row)
             buttons_row = []
+    
     if buttons_row:
         keyboard.inline_keyboard.append(buttons_row)
-    return keyboard
-
+    
+    return keyboard, model_map
 
 async def get_settings_keyboard(
     current_model,
@@ -229,7 +244,6 @@ async def get_settings_keyboard(
     current_model_short = current_model[:n-1] + "…"  if len(current_model) > n else current_model
     current_image_gen_model_short = current_image_gen_model[:n-1] + "…" if len(current_image_gen_model) > n else current_image_gen_model
 
-    # Role names mapping
     role_names = {
         "default": "🤖 Стандартный",
         "zumer": "🤪 Зумер",

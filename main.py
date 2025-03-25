@@ -31,6 +31,7 @@ from aiogram import types, F
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
+import httpx
 
 
 
@@ -221,6 +222,7 @@ async def cmd_help(message: types.Message, state: FSMContext):
         "/generate_image - Сгенерировать изображение\n"
         "/audio - Отправить аудио для транскрипции (Whisper)\n"
         "/search - Выполнить поиск в интернете\n"
+        "/meme - Получить случайный мем\n"
         "/long_message - Режим накопления сообщений\n"
         "/keyboard - Восстановить клавиатуру, если она исчезла\n"
         "Также можно присылать документы и изображения\n"
@@ -466,6 +468,11 @@ async def cmd_long_message_handler(message: types.Message, state: FSMContext):
     
     await cmd_long_message(message, state)
 
+@dp.message(Form.waiting_for_long_message)
+async def handle_long_message_handler(message: types.Message, state: FSMContext):
+    await handle_long_message(message, state)
+
+
 @dp.message(F.text == "⌨️ Вернуть клавиатуру")
 @dp.message(F.text == "/keyboard")
 async def cmd_restore_keyboard(message: types.Message, state: FSMContext):
@@ -488,10 +495,53 @@ async def cmd_restore_keyboard(message: types.Message, state: FSMContext):
     
     await state.set_state(Form.waiting_for_message)
 
-@dp.message(Form.waiting_for_long_message)
-async def handle_long_message_handler(message: types.Message, state: FSMContext):
-    await handle_long_message(message, state)
 
+async def fetch_random_meme():
+    url = "https://meme-api.com/gimme"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=10.0)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"Failed to fetch meme: {response.status_code}"}
+    except Exception as e:
+        return {"error": f"Error fetching meme: {str(e)}"}
+
+
+@dp.message(F.text == "🎭 Мем")
+@dp.message(F.text == "/meme")
+async def cmd_random_meme(message: types.Message, state: FSMContext):
+    if not is_allowed(message.from_user.id):
+        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    wait_message = await message.reply("🔍 Ищу мем для вас...")
+    
+    meme_data = await fetch_random_meme()
+    
+    if "error" in meme_data:
+        await wait_message.edit_text(f"😕 Не удалось получить мем: {meme_data['error']}")
+        return
+    
+    meme_url = meme_data.get("url")
+    meme_title = meme_data.get("title", "Случайный мем")
+    
+    if not meme_url:
+        await wait_message.edit_text("😕 Не удалось получить ссылку на мем")
+        return
+    
+    try:
+        await wait_message.delete()
+        await message.answer_photo(
+            photo=meme_url,
+            caption=f"<b>{meme_title}</b>",
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        await wait_message.edit_text(f"😕 Не удалось отправить мем: {str(e)}")
+
+        
 @dp.message()
 async def handle_all_messages_handler(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -580,6 +630,8 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
             await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
     else:
         await handle_all_messages(message, state)
+
+
 
 
 

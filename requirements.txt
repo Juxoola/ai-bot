@@ -165,3 +165,4 @@ xlrd
 olefile
 cachetools
 pydub
+deep_translator
