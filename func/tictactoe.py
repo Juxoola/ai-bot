@@ -3,7 +3,6 @@ from aiogram.fsm.context import FSMContext
 import random
 from config import Form
 import asyncio
-import json
 import logging
 
 # Константы для игры
@@ -215,9 +214,10 @@ async def process_tictactoe_callback(callback_query: types.CallbackQuery, state:
                 else:
                     message_text += "🤝 Ничья! 🤝\n\n"
             else:
+                # Небольшая пауза для естественности
                 await asyncio.sleep(0.1) 
-                game.computer_move()  
-                
+                # Запуск хода компьютера в отдельном потоке
+                await asyncio.to_thread(game.computer_move)
                 
                 if game.game_over:
                     if game.winner == COMPUTER:

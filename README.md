@@ -215,7 +215,7 @@ docker-compose up -d
 
 Бот может обрабатывать различные типы файлов:
 
-- **Текстовые форматы**: TXT, MD, XML, JSON, JS, PY, PHP, CSS, YAML, SQL и др.
+- **Текстовые форматы**: TXT, MD, XML, JSON, JS, PY, PHP, CSS, и др.
 - **Документы**: PDF, DOCX, DOC
 - **Таблицы**: XLSX, XLS, CSV
 - **Изображения**: JPEG, PNG

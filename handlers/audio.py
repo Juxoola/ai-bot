@@ -16,31 +16,22 @@ async def cmd_audio(message: types.Message, state: FSMContext):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
     
-    WHISPER_MODELS = await whisp_models()
-    
-    keyboard = types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [types.InlineKeyboardButton(text=model_name, callback_data=f"whisper_model_{model_id}")]
-            for model_id, model_name in WHISPER_MODELS.items()
-        ]
-    )
-    
-    await message.reply(
-        "Выберите модель Whisper для транскрипции аудио:",
-        reply_markup=keyboard
-    )
-    
-    await state.set_state(Form.waiting_for_whisper_model_selection)
+    user_id = message.from_user.id
+    current_state = await state.get_state()
 
+    if current_state == Form.waiting_for_audio:
+        await state.set_state(Form.waiting_for_message)
+        await message.reply("🔔Режим ожидания аудио отключен.")
+        return
+    else:
+        await message.reply("🔔Пожалуйста, отправьте аудиофайл для транскрипции.")
+        await state.set_state(Form.waiting_for_audio)
 
 @dp.message(Form.waiting_for_audio, lambda message: message.audio or message.voice or message.document and message.document.mime_type.startswith('audio/') or message.video_note)
 async def handle_audio_handler(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    await handle_audio(message, state)
-
+    WHISPER_MODELS = await whisp_models()
+    await handle_audio(message, state, WHISPER_MODELS)
 
 @dp.callback_query(Form.waiting_for_whisper_model_selection, lambda c: c.data and c.data.startswith("whisper_model_"))
 async def process_whisper_model_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
-    await process_whisper_model_selection(callback_query, state) 
+    await process_whisper_model_selection(callback_query, state)

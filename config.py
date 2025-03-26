@@ -97,6 +97,7 @@ class Form(StatesGroup):
     waiting_for_new_image_gen_model_api = State()
     waiting_for_role_selection = State()
     playing_tictactoe = State()
+    playing_guess_number = State()
 
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
