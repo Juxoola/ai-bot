@@ -115,10 +115,6 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
         user_context["messages"].append({"role": "assistant", "content": response.text})
         await save_context(user_id, user_context)
 
-    except Exception as e:
-        logging.error(f"Ошибка при работе с моделью Gemini: {e}")
-        await bot.send_message(user_id, f"🚨Произошла ошибка при работе с моделью Gemini: {e}")
-
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_data=None)
 

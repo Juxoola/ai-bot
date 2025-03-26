@@ -1,14 +1,12 @@
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import State, StatesGroup
 from aiogram import Bot, Dispatcher
-import g4f.providers
 import openai
 import google.generativeai as genai
-from g4f.client import AsyncClient, Client
+from g4f.client import Client
 from g4f.Provider import RetryProvider
 from groq import Groq
-from key import GROQ_API_KEY, GEMINI_API_KEY, GLHF_API_KEY, BOT_TOKEN, DDC_API_KEY, OPEN_ROUTER_KEY, FRESED_API_KEY
-import g4f
+from key import GROQ_API_KEY, GEMINI_API_KEY, BOT_TOKEN
 import os
 import logging
 import json
@@ -98,6 +96,7 @@ class Form(StatesGroup):
     waiting_for_new_image_gen_model_id = State()
     waiting_for_new_image_gen_model_api = State()
     waiting_for_role_selection = State()
+    playing_tictactoe = State()
 
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -111,13 +110,6 @@ except json.JSONDecodeError as e:
     logging.error("Ошибка при разборе OPENAI_PROVIDERS: %s", e)
     providers_config = {}
 
-if not providers_config:
-    providers_config = {
-        "glhf": {"api_key": GLHF_API_KEY, "base_url": "https://text.pollinations.ai/openai"},
-        "ddc": {"api_key": DDC_API_KEY, "base_url": "https://api.sree.shop/v1"},
-        "openrouter": {"api_key": OPEN_ROUTER_KEY, "base_url": "https://openrouter.ai/api/v1"},
-        "fresed": {"api_key": FRESED_API_KEY, "base_url": "https://fresedgpt.space/v1"}
-    }
 
 openai_clients = {}
 for provider, cfg in providers_config.items():
@@ -138,21 +130,17 @@ def get_provider(provider_name: str):
 
 raw_chat_providers = os.environ.get(
     "CHAT_PROVIDERS",
-    "DDG,Blackbox,CablyAI,Glider,HuggingSpace,PerplexityLabs,TeachAnything,PollinationsAI,OIVSCode,DeepInfraChat,ImageLabs"
+    ""
 )
 chat_providers = [get_provider(p.strip()) for p in raw_chat_providers.split(",") if p.strip()]
 
 raw_image_providers = os.environ.get(
     "IMAGE_PROVIDERS",
-    "Blackbox,DeepInfraChat,PollinationsAI,OIVSCode"
+    ""
 )
 image_providers = [get_provider(p.strip()) for p in raw_image_providers.split(",") if p.strip()]
 
-raw_web_search_providers = os.environ.get(
-    "WEB_SEARCH_PROVIDERS",
-    "Blackbox"
-)
-web_search_providers = [get_provider(p.strip()) for p in raw_web_search_providers.split(",") if p.strip()]
+
 
 raw_provider_models = os.environ.get("PROVIDER_MODELS")
 if raw_provider_models:
@@ -172,20 +160,7 @@ if raw_provider_models:
         logging.error("Error parsing PROVIDER_MODELS env variable: %s", e)
         PROVIDER_MODELS = {}
 else:
-    PROVIDER_MODELS = {
-        get_provider("Blackbox"): ['gpt-4o', 'gemini-1.5-flash', 'llama-3.3-70b', 'mixtral-7b', 'deepseek-chat', 'dbrx-instruct', 'qwq-32b', 'hermes-2-dpo', 'flux', 'deepseek-r1', 'deepseek-v3', 'blackboxai-pro', 'llama-3.1-8b', 'llama-3.1-70b', 'llama-3.1-405b', 'blackboxai', 'gemini-2.0-flash', 'o3-mini'],
-        get_provider("Glider"): ['llama-3.1-70b', 'llama-3.1-8b', 'llama-3.2-3b', 'deepseek-r1'],
-        get_provider("DeepInfraChat"): ['llama-3.1-8b', 'llama-3.2-90b', 'llama-3.3-70b', 'deepseek-v3', 'mixtral-small-28b', 'deepseek-r1', 'phi-4', 'wizardlm-2-8x22b', 'qwen-2.5-72b', 'llama-3.2-90b', 'minicpm-2.5'],
-        get_provider("HuggingSpace"): ['qvq-72b', 'qwen-2-72b', 'command-r', 'command-r-plus', 'command-r7b', 'flux-dev', 'flux-schnell', 'sd-3.5'],
-        get_provider("DDG"): ['gpt-4o-mini', 'claude-3-haiku', 'llama-3.3-70b', 'mixtral-small-24b', 'o3-mini'],
-        get_provider("PollinationsAI"): ['gpt-4o-mini', 'gpt-4', 'gpt-4o', 'qwen-2.5-72b', 'qwen-2.5-coder-32b', 'llama-3.3-70b', 'mistral-nemo', 'deepseek-chat', 'llama-3.1-8b', 'gpt-4o-vision', 'gpt-4o-mini-vision', 'deepseek-r1', 'gemini-2.0-flash', 'gemini-2.0-flash-thinking', 'sdxl-turbo', 'flux'],
-        get_provider("OIVSCode"): ['gpt-4o-mini'],
-        get_provider("ImageLabs"): ['sdxl-turbo'],
-        get_provider("TeachAnything"): ['llama-3.1-70b'],
-        get_provider("PerplexityLabs"): ['sonar', 'sonar-pro', 'sonar-reasoning', 'sonar-reasoning-pro', 'r1-1776'],
-        get_provider("CablyAI"): ['o3-mini-low', 'gpt-4o-mini', 'deepseek-r1', 'deepseek-v3'],
-        get_provider("Liaobots"): ['gpt-4o-mini', 'gpt-4o', 'gpt-4', 'o1-preview', 'o1-mini', 'deepseek-r1', 'deepseek-v3', 'claude-3-opus', 'claude-3.5-sonnet', 'claude-3-sonnet', 'gemini-2.0-flash', 'gemini-2.0-flash-thinking', 'gemini-1.5-flash', 'gemini-1.5-pro']
-    }
+    PROVIDER_MODELS = {}
 
 raw_provider_image_recognition_models = os.environ.get("PROVIDER_IMAGE_RECOGNITION_MODELS")
 if raw_provider_image_recognition_models:
@@ -203,19 +178,9 @@ if raw_provider_image_recognition_models:
             PROVIDER_IMAGE_RECOGNITION_MODELS[provider_class] = models
     except Exception as e:
         logging.error("Error parsing PROVIDER_IMAGE_RECOGNITION_MODELS env variable: %s", e)
-        PROVIDER_IMAGE_RECOGNITION_MODELS = {
-            get_provider("Blackbox"): ['blackboxai', 'gpt-4o', 'o1', 'o3-mini', 'emini-1.5-pro', 'gemini-1.5-flash', 'llama-3.1-8b', 'llama-3.1-70b', 'llama-3.1-405b', 'gemini-2.0-flash', 'deepseek-v3'],
-            get_provider("PollinationsAI"): ['gpt-4o', 'gpt-4o-mini', 'o1-mini'],
-            get_provider("OIVSCode"): ['gpt-4o-mini'],
-            get_provider("DeepInfraChat"): ['llama-3.2-90b', 'minicpm-2.5'],
-        }
+        PROVIDER_IMAGE_RECOGNITION_MODELS = {}
 else:
-    PROVIDER_IMAGE_RECOGNITION_MODELS = {
-        get_provider("Blackbox"): ['blackboxai', 'gpt-4o', 'o1', 'o3-mini', 'emini-1.5-pro', 'gemini-1.5-flash', 'llama-3.1-8b', 'llama-3.1-70b', 'llama-3.1-405b', 'gemini-2.0-flash', 'deepseek-v3'],
-        get_provider("PollinationsAI"): ['gpt-4o', 'gpt-4o-mini', 'o1-mini'],
-        get_provider("OIVSCode"): ['gpt-4o-mini'],
-        get_provider("DeepInfraChat"): ['llama-3.2-90b', 'minicpm-2.5'],
-    }
+    PROVIDER_IMAGE_RECOGNITION_MODELS = {}
 
 def get_supported_providers(provider_classes, model_name=None):
 
@@ -237,23 +202,20 @@ def get_supported_providers(provider_classes, model_name=None):
 
 g4f_client_providers = get_supported_providers(chat_providers)
 g4f_image_client_providers = get_supported_providers(image_providers) 
-g4f_web_search_client_providers = get_supported_providers(web_search_providers)
 
 
 g4f_client = Client(provider=RetryProvider(g4f_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
 
 g4f_image_client = Client(provider=RetryProvider(g4f_image_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
 
-g4f_web_search_client = Client(provider=RetryProvider(g4f_web_search_client_providers, shuffle=False)) 
 
 
 def update_g4f_clients(model_name=None):
 
-    global g4f_client, g4f_image_client, g4f_web_search_client
+    global g4f_client, g4f_image_client
 
     updated_chat_providers = get_supported_providers(chat_providers, model_name)
     updated_image_providers = get_supported_providers(image_providers, model_name)
-    updated_web_search_providers = get_supported_providers(web_search_providers, model_name)
 
     g4f_client = Client(
         provider=RetryProvider(updated_chat_providers, shuffle=False),
@@ -265,10 +227,6 @@ def update_g4f_clients(model_name=None):
         image_provider=RetryProvider(updated_image_providers, shuffle=False)
     )
 
-    g4f_web_search_client = Client(
-        provider=RetryProvider(updated_web_search_providers, shuffle=False)
-    )
-
 
 user_clients = {} 
 
@@ -278,7 +236,6 @@ def get_user_clients(user_id, model_name=None):
     
     updated_chat_providers = get_supported_providers(chat_providers, model_name)
     updated_image_providers = get_supported_providers(image_providers, model_name)
-    updated_web_search_providers = get_supported_providers(web_search_providers, model_name)
     updated_image_gen_providers = get_supported_providers(chat_providers, model_name)
     
     updated_image_recognition_providers = get_image_recognition_providers(model_name)
@@ -293,9 +250,6 @@ def get_user_clients(user_id, model_name=None):
         "g4f_image_client": Client(
             provider=RetryProvider(updated_image_providers, shuffle=False),
             image_provider=RetryProvider(updated_image_providers, shuffle=False)
-        ),
-        "g4f_web_search_client": Client(
-            provider=RetryProvider(updated_web_search_providers, shuffle=False)
         ),
         "g4f_image_gen_client": Client(
             provider=RetryProvider(updated_image_gen_providers, shuffle=False),

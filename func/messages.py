@@ -17,7 +17,6 @@ import base64
 import aiofiles
 from pydub import AudioSegment
 
-# Global timeout settings (in seconds)
 DEFAULT_API_TIMEOUT = 60
 AUDIO_API_TIMEOUT = 120
 
@@ -232,7 +231,6 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
     response_text = ""
     response_audio = None
     
-    # Добавляем сообщение пользователя в контекст в зависимости от типа API
     allowed_apis = list(openai_clients.keys()) + ["g4f"]
     
     if api_type == "gemini":
@@ -490,7 +488,6 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                     if not is_long_message:
                         user_context["messages"].append({"role": "assistant", "content": response_text})
 
-        # Если есть текст ответа, обрабатываем его
         if response_text:
             # Удаляем теги <think> и </think> из ответа модели
             response_text = response_text.replace("<think>", "").replace("</think>", "")
@@ -504,9 +501,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
 
 async def handle_all_messages(message: types.Message, state: FSMContext, audio_response=False):
     user_id = message.from_user.id
-    
-    current_state = await state.get_state() or Form.waiting_for_message
-    
+        
     if not is_admin(user_id):
         rate_limiter = RateLimiter(rate_limit=5, per_seconds=60)
         can_process = await rate_limiter.can_process(user_id)
@@ -665,7 +660,6 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
             return
         
     start_time = time.time()
-    current_time = time.strftime("%H:%M:%S", time.localtime())
 
     user_context = await load_context(user_id)
     current_state = await state.get_state()

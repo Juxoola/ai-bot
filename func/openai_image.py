@@ -82,9 +82,6 @@ async def process_custom_image_prompt_openai(message: types.Message, state: FSMC
 
 async def handle_image_openai(message: types.Message, state: FSMContext):
 
-    user_id = message.from_user.id
-    user_context = await load_context(user_id)
-
     photo = message.photo[-1]
     file_info = await bot.get_file(photo.file_id)
     img_bytes = await bot.download_file(file_info.file_path)

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import os
 from config import openai_clients, DEFAULT_SYSTEM_PROMPTS
 import time
-from cachetools import TTLCache, LRUCache
+from cachetools import TTLCache
 import logging
 
 AVAILABLE_MODELS = None
