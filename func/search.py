@@ -1,6 +1,6 @@
 from aiogram.fsm.context import FSMContext
 from config import get_client, Form, openai_clients, DEFAULT_SYSTEM_PROMPTS
-from func.messages import fix_markdown, send_message_in_parts
+from func.messages import send_message_in_parts
 from database import load_context, save_context
 from aiogram import types
 import asyncio
@@ -268,18 +268,13 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 await send_message_in_parts(message, response_text, MAX_MESSAGE_LENGTH)
             else:
                 try:
-                    await message.answer(response_text, parse_mode=ParseMode.MARKDOWN)
+                    await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
                 except Exception as e:
                     logging.error(f"Ошибка Markdown при отправке сообщения: {e}")
-                    try:
-                        await message.answer("🔔Попытка фиксить форматирование сообщения")
-                        fixed_response = await fix_markdown(response_text)
-                        await message.answer(fixed_response, parse_mode=ParseMode.MARKDOWN)
-                    except Exception as e:
-                        await message.answer(
-                            f"🚨Произошла ошибка при форматировании сообщения: {e}\n\nОтправляю без форматирования."
-                        )
-                        await message.answer(response_text)
+                    await message.answer(
+                        f"🚨Произошла ошибка при форматировании сообщения: {e}\n\nОтправляю без форматирования."
+                    )
+                    await message.reply(response_text)
 
         if api_type in allowed_apis:
             user_context["messages"].append({"role": "assistant", "content": response_text})

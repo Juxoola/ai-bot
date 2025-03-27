@@ -1,21 +1,31 @@
 from aiogram import types, F
+import asyncio
+import random
+import httpx
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
-from config import Form, dp, DEFAULT_SYSTEM_PROMPTS
+from config import Form, dp, bot,DEFAULT_SYSTEM_PROMPTS
 from database import load_context, save_context, is_admin, is_allowed, av_models, rec_models, def_gen_model, def_rec_model, def_aspect, def_enhance, def_voice
 from keyboards import get_admin_keyboard, get_main_keyboard
+from handlers.check import clear_in_progress, exit_game
+from func.tictactoe import game_sessions as ttt_game_sessions
+from func.guess_number import game_sessions as guess_game_sessions
+from handlers.rate_limit import check_rate_limit
 
 otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN,
-                          reply_markup=await get_main_keyboard(include_admin_button=False))
+    user_id = message.from_user.id
+    
+    if not is_allowed(user_id):
+        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    if not await check_rate_limit(message, "start"):
         return
 
-    user_id = message.from_user.id
     user_context = await load_context(user_id)
     
     await save_context(user_id, user_context)
@@ -38,24 +48,17 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.set_state(Form.waiting_for_message)
 
 
-@dp.message(F.text == "Открыть админ-клавиатуру", lambda message: is_admin(message.from_user.id))
-async def cmd_open_admin_keyboard(message: types.Message, state: FSMContext):
-    await message.reply("🔔Вы открыли админ-клавиатуру.", reply_markup= await get_admin_keyboard())
-
-
-@dp.message(F.text == "Главное меню", lambda message: is_admin(message.from_user.id))
-async def cmd_back_to_main_menu(message: types.Message, state: FSMContext):
-    await message.reply("🔔Вы вернулись в главное меню.", reply_markup=await get_main_keyboard(include_admin_button=True))
-    await state.set_state(Form.waiting_for_message)
-
-
 @dp.message(F.text == "ℹ️ Помощь")
 @dp.message(F.text == "/help")
 async def cmd_help(message: types.Message, state: FSMContext):
     if not is_allowed(message.from_user.id):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
-    
+      
+    if not await check_rate_limit(message, "help"):
+        return
+
+
     AVAILABLE_MODELS = await av_models()
     REC_MODELS = await rec_models()
     
@@ -125,6 +128,9 @@ async def cmd_restore_keyboard(message: types.Message, state: FSMContext):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
     
+    if not await check_rate_limit(message, "keyboard"):
+        return
+    
     user_id = message.from_user.id
     if is_admin(user_id):
         await message.reply(
@@ -138,40 +144,75 @@ async def cmd_restore_keyboard(message: types.Message, state: FSMContext):
         )
 
 
-@dp.message(F.text == "🗑️ Очистить")
-@dp.message(F.text == "/clear")
-async def cmd_clear_context(message: types.Message, state: FSMContext):
+async def fetch_random_meme():
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get("https://meme-api.com/gimme")
+            data = response.json()
+            
+            if "url" in data and data["url"]:
+                return {
+                    "url": data["url"],
+                    "title": data.get("title", "Random Meme"),
+                    "source": f"https://reddit.com{data.get('postLink', '')}"
+                }
+    except Exception as e:
+        print(f"Error fetching from meme-api.com: {e}")
+
+
+@dp.message(F.text == "🎭 Мем")
+@dp.message(F.text == "/meme")
+async def cmd_random_meme(message: types.Message, state: FSMContext):
     if not is_allowed(message.from_user.id):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
+    
+    if not await check_rate_limit(message, "meme"):
+        return
+    
+    processing_message = await message.reply("Ищу смешной мем...")
+    
+    try:
+        meme = await fetch_random_meme()
+        
+        await bot.send_photo(
+            chat_id=message.chat.id,
+            photo=meme["url"],
+            caption=f"{meme['title']}"
+        )
+        
+        await bot.delete_message(chat_id=message.chat.id, message_id=processing_message.message_id)
+        
+    except Exception as e:
+        await processing_message.edit_text(f"Не удалось найти мем. Ошибка: {str(e)}")
+        
+    current_state = await state.get_state()
+    if current_state != Form.waiting_for_message:
+        await state.set_state(Form.waiting_for_message)
 
-    user_id = message.from_user.id
-    user_context = await load_context(user_id)
-    api_type = user_context["api_type"]
+
+@dp.message(F.text == "/cancel")
+async def cmd_cancel(message: types.Message, state: FSMContext):
+    if not is_allowed(message.from_user.id):
+        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
+        return
     
-    system_role = user_context.get("system_role", "default")
-    system_prompt = DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"])
+    if not await check_rate_limit(message, "cancel"):
+        return
     
-    new_context = {
-        "model": user_context["model"],
-        "api_type": api_type,
-        "g4f_image": None,
-        "g4f_image_base64": None,
-        "long_message": "",
-        "image_generation_model": user_context.get("image_generation_model", await def_gen_model()),
-        "image_recognition_model": user_context.get("image_recognition_model", await def_rec_model()),
-        "aspect_ratio": user_context.get("aspect_ratio", await def_aspect()),
-        "enhance": user_context.get("enhance", await def_enhance()),
-        "show_processing_time": user_context.get("show_processing_time", True),
-        "voice": user_context.get("voice", await def_voice()),
-        "system_role": system_role,
-        "messages": []
-    }
+    current_state = await state.get_state()
     
-    if api_type == "gemini":
-        new_context["messages"] = [{"role": "system", "parts": [{"text": system_prompt}]}]
+    if current_state in [Form.playing_tictactoe, Form.playing_guess_number]:
+        user_id = message.from_user.id
+        
+        if current_state == Form.playing_tictactoe and user_id in ttt_game_sessions:
+            del ttt_game_sessions[user_id]
+        elif current_state == Form.playing_guess_number and user_id in guess_game_sessions:
+            del guess_game_sessions[user_id]
+            
+        await exit_game(state)
+        await message.reply("✅ Вы вышли из игры. Можете продолжать общение.")
     else:
-        new_context["messages"] = [{"role": "system", "content": system_prompt}]
-
-    await save_context(user_id, new_context)
-    await message.reply("Контекст очищен.")
+        await clear_in_progress(state)
+        await state.set_state(Form.waiting_for_message)
+        await message.reply("✅ Текущая операция отменена. Можете продолжать общение.") 

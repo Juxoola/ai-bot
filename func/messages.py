@@ -159,24 +159,24 @@ async def send_message_in_parts(message, response_text, max_length=4050):
                 for subpart_index, subpart in enumerate(subparts):
                     if subpart.strip(): 
                         try:
-                            await message.answer(subpart, parse_mode=ParseMode.MARKDOWN)
+                            await message.reply(subpart, parse_mode=ParseMode.MARKDOWN)
                             await asyncio.sleep(0.1)
                         except Exception as e:
                             logging.error(f"Ошибка при отправке подчасти {subpart_index} части {part_index}: {e}")
-                            await message.answer(subpart) 
+                            await message.reply(subpart) 
 
             else:
                 if fixed_part.strip(): 
                     try:
-                        await message.answer(fixed_part, parse_mode=ParseMode.MARKDOWN)
+                        await message.reply(fixed_part, parse_mode=ParseMode.MARKDOWN)
                         await asyncio.sleep(0.1)
                     except Exception as e:
                         logging.error(f"Ошибка при отправке части {part_index} с Markdown: {e}")
-                        await message.answer(part)
+                        await message.reply(part)
 
         except Exception as e:
             logging.error(f"Ошибка при обработке и отправке части сообщения {part_index}: {e}")
-            await message.answer(part) 
+            await message.reply(part) 
             await asyncio.sleep(0.1)
 
 
@@ -431,7 +431,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                             
                             try:
                                 with open(temp_ogg_path, "rb") as audio_file:
-                                    await message.answer_audio(
+                                    await message.reply_audio(
                                         audio=types.BufferedInputFile(audio_file.read(), filename="response.ogg"),
                                         caption="🔊 Аудио-ответ"
                                     )
@@ -618,7 +618,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
 
                 try:
                     with open(temp_file_path, "rb") as file_to_send:
-                        await message.answer_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
+                        await message.reply_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
                 except Exception as e:
                     logging.error(f"Ошибка при отправке файла: {e}")
                     await message.answer("🚨 Не удалось отправить ответ в виде файла.")
@@ -626,21 +626,28 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
                     os.remove(temp_file_path)
             else:
                 try:
-                    await message.answer(response_text, parse_mode=ParseMode.MARKDOWN)
+                    await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
                 except Exception as e:
                     logging.error(f"Ошибка Markdown при отправке сообщения: {e}")
+                    await message.answer(
+                        f"🚨Произошла ошибка при форматировании сообщения: {e}\n\n"
+                        "Отправляю без форматирования."
+                    )
+                    await message.reply(response_text)
+                    
+                    # Дополнительно отправляем ответ в виде текстового файла
+                    with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".txt") as temp_file:
+                        temp_file.write(response_text)
+                        temp_file_path = temp_file.name
+
                     try:
-                        await message.answer(
-                            f"🔔Попытка фиксить форматирование сообщения"
-                        )
-                        fixed_response = await fix_markdown(response_text)
-                        await message.answer(fixed_response,parse_mode=ParseMode.MARKDOWN)
-                    except Exception as e:
-                        await message.answer(
-                            f"🚨Произошла ошибка при форматировании сообщения: {e}\n\n"
-                            "Отправляю без форматирования."
-                        )
-                        await message.answer(response_text)
+                        with open(temp_file_path, "rb") as file_to_send:
+                            await message.reply_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
+                    except Exception as file_e:
+                        logging.error(f"Ошибка при отправке файла: {file_e}")
+                        await message.answer("🚨 Не удалось отправить ответ в виде файла.")
+                    finally:
+                        os.remove(temp_file_path)
 
             await save_context(user_id, user_context)
 
@@ -702,7 +709,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
 
                     try:
                         with open(temp_file_path, "rb") as file_to_send:
-                            await message.answer_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
+                            await message.reply_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
                     except Exception as e:
                         logging.error(f"Ошибка при отправке файла: {e}")
                         await message.answer("🚨 Не удалось отправить ответ в виде файла.")
@@ -710,27 +717,29 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
                         os.remove(temp_file_path)
                 else:
                     try:
-                        await message.answer(response_text, parse_mode=ParseMode.MARKDOWN)
+                        await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
                     except Exception as e:
                         logging.error(f"Ошибка Markdown при отправке сообщения: {e}")
-                        try:
-                            await message.answer(
-                                f"🔔Попытка фиксить форматирование сообщения"
-                            )
-                            fixed_response = await fix_markdown(
-                                response_text
-                            )
-                            await message.answer(
-                                fixed_response,
-                                parse_mode=ParseMode.MARKDOWN,
-                            )
-                        except Exception as e:
-                            await message.answer(
-                                f"🚨Произошла ошибка при форматировании сообщения: {e}\n\n"
-                                "Отправляю без форматирования."
-                            )
-                            await message.answer(response_text)
+                        await message.answer(
+                            f"🚨Произошла ошибка при форматировании сообщения: {e}\n\n"
+                            "Отправляю без форматирования."
+                        )
+                        await message.reply(response_text)
                             
+                        # Дополнительно отправляем ответ в виде текстового файла
+                        with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".txt") as temp_file:
+                            temp_file.write(response_text)
+                            temp_file_path = temp_file.name
+
+                        try:
+                            with open(temp_file_path, "rb") as file_to_send:
+                                await message.reply_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
+                        except Exception as file_e:
+                            logging.error(f"Ошибка при отправке файла: {file_e}")
+                            await message.answer("🚨 Не удалось отправить ответ в виде файла.")
+                        finally:
+                            os.remove(temp_file_path)
+
                 if api_type != "gemini":
                     user_context["messages"].append(
                         {"role": "assistant", "content": response_text}
@@ -764,6 +773,7 @@ async def handle_long_message(message: types.Message, state: FSMContext):
     user_context["long_message"] += message.text + "\n"
     await save_context(user_id, user_context)
     await message.reply("🔔Сообщение добавлено к накоплению.")
+    await state.set_state(Form.waiting_for_long_message)
 
 def call_openai_completion_sync(api_type, model, messages, **kwargs):
     """Синхронная версия для вызова OpenAI API, которая используется в async_run_with_timeout."""

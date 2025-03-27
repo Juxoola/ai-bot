@@ -191,6 +191,9 @@ async def process_tictactoe_callback(callback_query: types.CallbackQuery, state:
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
+        
+        # Устанавливаем состояние игры заново при перезапуске
+        await state.set_state(Form.playing_tictactoe)
     elif data == "ttt_exit":
         await callback_query.message.edit_text(
             "Игра в крестики-нолики завершена. Спасибо за игру!",
@@ -213,6 +216,9 @@ async def process_tictactoe_callback(callback_query: types.CallbackQuery, state:
                     message_text += "🎉 Поздравляем! Вы выиграли! 🎉\n\n"
                 else:
                     message_text += "🤝 Ничья! 🤝\n\n"
+                
+                # Выходим из игрового состояния автоматически при завершении игры
+                await state.set_state(Form.waiting_for_message)
             else:
                 # Небольшая пауза для естественности
                 await asyncio.sleep(0.1) 
@@ -224,6 +230,9 @@ async def process_tictactoe_callback(callback_query: types.CallbackQuery, state:
                         message_text += "😔 Компьютер выиграл! 😔\n\n"
                     else:
                         message_text += "🤝 Ничья! 🤝\n\n"
+                    
+                    # Выходим из игрового состояния автоматически при завершении игры  
+                    await state.set_state(Form.waiting_for_message)
                 else:
                     message_text += "Вы играете за ❌. Сделайте свой ход, нажав на клетку.\n\n"
             

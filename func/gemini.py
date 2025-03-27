@@ -1,12 +1,11 @@
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 from config import Form,  bot, DEFAULT_SYSTEM_PROMPTS
-from database import load_context,save_context,av_models
+from database import load_context,save_context
 import asyncio
 import base64
 import logging
 from aiogram.enums import ParseMode
-from func.messages import fix_markdown
 import google.generativeai as genai
 import tempfile
 import os
@@ -95,22 +94,15 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
             lambda: chat.send_message(messages_for_model[-1])
         )
 
-        await bot.send_message(user_id, response.text, parse_mode=ParseMode.MARKDOWN)
+        await message.reply(response.text, parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
         logging.error(f"Ошибка Markdown при отправке сообщения: {e}")
-        try:
-            await bot.send_message(user_id,
-                f"🔔Попытка фиксить форматирование сообщения"
-            )
-            fixed_response = await fix_markdown(response.text)
-            await bot.send_message(user_id, fixed_response, parse_mode=ParseMode.MARKDOWN)
-        except Exception as e:
-            await bot.send_message(user_id,
-                f"🚨Произошла ошибка при форматировании сообщения: {e}\n\n"
-                "Отправляю без форматирования."
-            )
-            await bot.send_message(user_id, response.text)
+        await bot.send_message(user_id,
+            f"🚨Произошла ошибка при форматировании сообщения: {e}\n\n"
+            "Отправляю без форматирования."
+        )
+        await message.reply(response.text)
 
         user_context["messages"].append({"role": "assistant", "content": response.text})
         await save_context(user_id, user_context)
@@ -119,7 +111,6 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
     await state.update_data(image_data=None)
 
 async def handle_document_with_conversion(message: types.Message, state: FSMContext):
-    """Обработка документов для Gemini с конвертацией несовместимых форматов"""
     user_id = message.from_user.id
     user_context = await load_context(user_id)
 

@@ -136,6 +136,8 @@ async def process_guess_callback(callback_query: types.CallbackQuery, state: FSM
         await game.async_reset()
         await state.update_data(current_input="")
         
+        await state.set_state(Form.playing_guess_number)
+        
         message_text = (
             "🎮 Угадай число 🎮\n\n"
             f"Я загадал число от {game.min_number} до {game.max_number}.\n"
@@ -214,6 +216,8 @@ async def process_guess_callback(callback_query: types.CallbackQuery, state: FSM
                                 f"Загаданное число: {game.secret_number}\n"
                                 f"Ваши попытки: {game.get_previous_guesses()}"
                             )
+                        
+                        await state.set_state(Form.waiting_for_message)
                         
                         await callback_query.message.edit_text(
                             message_text,

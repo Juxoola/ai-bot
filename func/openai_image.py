@@ -42,6 +42,7 @@ async def process_image_with_openai(message: types.Message, state: FSMContext, p
     ]
 
     try:
+        logging.info(f"[{start_time}] Начало запроса к OpenAI API IMAGE ({api_type}) с моделью {model}.")
         completion = await async_run_with_timeout(
             call_openai_completion_sync,
             DEFAULT_API_TIMEOUT,

@@ -39,6 +39,10 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     data = await state.get_data()
     prompt = data.get("image_generation_prompt")
     is_direct_image_gen = data.get("is_direct_image_gen", False)
+    
+    # Store the original message ID to reply to it later
+    original_message_id = message.message_id
+    await state.update_data(original_message_id=original_message_id)
 
     if not is_direct_image_gen:
         await message.reply(
@@ -66,7 +70,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             api_type = model_info[last_underscore_pos+1:]
         else:
             model_id = model_info
-            api_type = "poli"  # API по умолчанию
+            api_type = "poli" 
     
     aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     enhance = user_context.get("enhance", DEFAULT_ENHANCE)
@@ -111,23 +115,26 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 prompt = translated_prompt
                 await bot.send_message(
                     user_id, 
-                    f"🔔 Ваш запрос был переведен на английский для лучших результатов:\n'{original_prompt}' → '{prompt}'"
+                    f"🔔 Ваш запрос был переведен на английский для лучших результатов:\n'{original_prompt}' → '{prompt}'",
+                    reply_to_message_id=original_message_id
                 )
         except Exception as e:
             logging.error(f"Error during prompt translation: {e}")
-            await bot.send_message(user_id, f"⚠️ Не удалось перевести запрос на английский: {e}")
+            await bot.send_message(
+                user_id, 
+                f"⚠️ Не удалось перевести запрос на английский: {e}",
+                reply_to_message_id=original_message_id
+            )
 
     # Улучшение промпта для всех моделей, если enhance=True
     if enhance:
         try:
-            system_prompt = "YOU ARE AN ELITE PROMPT ENGINEER SPECIALIZING IN ENHANCING PROMPTS FOR IMAGE DESCRIPTION GENERATION. YOUR TASK IS TO ACCEPT A TEXT INPUT IN ANY LANGUAGE AND PRODUCE AN OPTIMIZED PROMPT IN ENGLISH FOR A GENERATIVE MODEL. THE OPTIMIZED PROMPT MUST INCLUDE A DETAILED DESCRIPTION OF THE SCENE, SPECIFYING WHAT IS HAPPENING AND INCORPORATING SUBTLE DETAILS TO ENSURE BEAUTIFUL VISUALIZATION. YOUR OUTPUT SHOULD BE THE DESCRIPTION IN ENGLISH ONLY, WITHOUT ANY ADDITIONAL COMMENTS OR EXPLANATIONS. ###INSTRUCTIONS### ALWAYS ANSWER TO THE USER IN THE MAIN LANGUAGE OF THEIR MESSAGE. 1. **TRANSLATE** the provided input text to English if necessary. 2. **ANALYZE** the scene to identify all critical elements such as the setting, actions, characters, and objects. 3. **ENRICH** the description by adding subtle details that enhance the visual quality and realism of the scene. 4. **ENSURE** the prompt is clear. vivid. and evocative to aid the generative model in"
             improved_prompt = await asyncio.to_thread(
                 lambda:
                     config.enhance_prompt_client.chat.completions.create(
                         model=model_name_e,
                         messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt}
+                            {"role": "user", "content": f"You are a text prompt generator for creating images. I will give you a post topic, and you will generate one best-quality prompt and show it to me.\n\n{prompt}\n\nDo not ask for clarifications—just generate the best prompt using your creativity, and I will request changes if needed.\n\n### Prompt Structure:\n- Camera angle → Scene description → Character description → Camera settings\n- Character descriptions must always be separated by commas.\n- All parts of the structure must be separated by commas.\n\n### Notes:\n- At the end of the prompt, you may also include the camera type (if it's not a painting style), such as DSLR, Nikon D, Canon EOS R3, etc.\n- You can specify a lens type (e.g., 14mm focal length, 35mm, fisheye, wide-angle, etc.) if necessary.\n\n### Example Formatting:\n- Highly detailed watercolor painting, majestic lion, intricate fur detail, photograph, natural lighting, brush strokes, watercolor splatters\n- Portrait photo of a red-haired girl standing in water covered with lily pads, long braided hair, Canon EOS R3, volumetric lighting\n- Wide-angle, stunning sunset over a wide open beach, vibrant pink-orange and gold sky, water reflecting sunset colors, mesmerizing effect, lone tall tree in foreground, tree silhouetted against sunset, dramatic feel, Canon EOS R3, landscape scene\n- Watercolor painting, family of elephants roaming the savanna, delicate brush strokes, soft colors, Canon EOS R3, wide-angle lens\n\n### IMPORTANT:\nGenerate the best possible prompt immediately in English, and show only the prompt. Do not write anything else."}
                         ],
                     )
             )
@@ -175,13 +182,21 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     user_id,
                     photo=types.BufferedInputFile(image_data, filename="image.jpg"),
                     caption=caption,
+                    reply_to_message_id=original_message_id
                 )
                 caption2 = "Фото без сжатия"
-                await bot.send_document(user_id, document=types.BufferedInputFile(image_data, filename="image.jpg"), caption=caption2)
+                await bot.send_document(
+                    user_id, 
+                    document=types.BufferedInputFile(image_data, filename="image.jpg"), 
+                    caption=caption2,
+                    reply_to_message_id=original_message_id
+                )
                 break
             except Exception as e:
                 await bot.send_message(
-                    user_id, f"🚨Ошибка во время генерации изображения: {e}"
+                    user_id, 
+                    f"🚨Ошибка во время генерации изображения: {e}",
+                    reply_to_message_id=original_message_id
                 )
                 break 
 
@@ -193,7 +208,8 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 return client.images.generate(
                     model=model_id,
                     prompt=prompt,
-                    size=size_str
+                    size=size_str,
+                    response_format="url"
                 )
             
             response = await async_run_with_timeout(generate_openai_content, DEFAULT_API_TIMEOUT)
@@ -204,12 +220,17 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 image_data = response.generated_images[0].image.getvalue()
             elif hasattr(response, 'data') and response.data:
                 image_url = response.data[0].url
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(image_url) as resp:
-                        if resp.status == 200:
-                            image_data = await resp.read()
-                        else:
-                            raise Exception(f"Не удалось скачать изображение, статус: {resp.status}")
+                if image_url.startswith('data:image/jpeg;base64,'):
+                    import base64
+                    base64_data = image_url.split('base64,')[1]
+                    image_data = base64.b64decode(base64_data)
+                else:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(image_url) as resp:
+                            if resp.status == 200:
+                                image_data = await resp.read()
+                            else:
+                                raise Exception(f"Не удалось скачать изображение, статус: {resp.status}")
             else:
                 raise Exception(f"Неподдерживаемый формат ответа от {api_type} client")
             caption = f"Фото сгенерировано {api_type} моделью {model_id}"
@@ -222,16 +243,22 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 user_id,
                 photo=types.BufferedInputFile(image_data, filename="image.jpg"),
                 caption=caption,
+                reply_to_message_id=original_message_id
             )
             caption2 = "Фото без сжатия"
             await bot.send_document(
                 user_id,
                 document=types.BufferedInputFile(image_data, filename="image.jpg"),
                 caption=caption2,
+                reply_to_message_id=original_message_id
             )
         except Exception as e:
             logging.error(f"Error during {api_type} image generation: {e}")
-            await bot.send_message(user_id, f"🚨Ошибка во время генерации изображения с помощью {api_type} client: {e}")
+            await bot.send_message(
+                user_id, 
+                f"🚨Ошибка во время генерации изображения с помощью {api_type} client: {e}",
+                reply_to_message_id=original_message_id
+            )
 
     elif api_type == "gemini":
         if genai_client:
@@ -265,7 +292,11 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     error_message = "🚨Модель не сгенерировала изображение в ответе."
                     if text_response:
                         error_message += f"\n\nОтвет модели: {text_response}"
-                    await bot.send_message(user_id, error_message)
+                    await bot.send_message(
+                        user_id, 
+                        error_message,
+                        reply_to_message_id=original_message_id
+                    )
                     return
 
                 caption = f"Фото сгенерировано моделью {model_id}"
@@ -277,6 +308,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     user_id,
                     photo=types.BufferedInputFile(image_data, filename="image.jpg"),
                     caption=caption,
+                    reply_to_message_id=original_message_id
                 )
                 
                 caption2 = "Фото без сжатия"
@@ -284,12 +316,21 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     user_id, 
                     document=types.BufferedInputFile(image_data, filename="image.jpg"),
                     caption=caption2,
+                    reply_to_message_id=original_message_id
                 )
             except Exception as e:
                 logging.error(f"Error during Gemini image generation: {e}")
-                await bot.send_message(user_id, f"🚨Ошибка во время генерации изображения с помощью Gemini API: {e}")
+                await bot.send_message(
+                    user_id, 
+                    f"🚨Ошибка во время генерации изображения с помощью Gemini API: {e}",
+                    reply_to_message_id=original_message_id
+                )
         else:
-            await bot.send_message(user_id, "🚨Генерация изображений через Gemini недоступна. API-ключ не настроен.")
+            await bot.send_message(
+                user_id, 
+                "🚨Генерация изображений через Gemini недоступна. API-ключ не настроен.",
+                reply_to_message_id=original_message_id
+            )
 
     elif api_type == "g4f":
         image_gen_client = get_client(user_id, "g4f_image_gen_client", model_name=model_id)
@@ -322,12 +363,22 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 user_id,
                 photo=image_url,
                 caption=caption,
+                reply_to_message_id=original_message_id
             )
             caption2 = "Фото без сжатия"
-            await bot.send_document(user_id, document=image_url, caption=caption2)
+            await bot.send_document(
+                user_id, 
+                document=image_url, 
+                caption=caption2,
+                reply_to_message_id=original_message_id
+            )
         except Exception as e:
             logging.error(f"Error during image generation: {e}")
-            await bot.send_message(user_id, f"🚨Ошибка во время генерации изображения: {e}")
+            await bot.send_message(
+                user_id, 
+                f"🚨Ошибка во время генерации изображения: {e}",
+                reply_to_message_id=original_message_id
+            )
 
     end_time = time.time()
     processing_time = end_time - start_time
@@ -335,12 +386,17 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
 
     if user_context.get("show_processing_time", True):
-        await bot.send_message(user_id, service_info)
+        await bot.send_message(
+            user_id, 
+            service_info,
+            reply_to_message_id=original_message_id
+        )
 
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_generation_prompt=None)
     await state.update_data(aspect_ratio=None)
     await state.update_data(enhance=None)
+    await state.update_data(original_message_id=None)
 
 
 async def handle_image_recognition(message: types.Message, state: FSMContext):
@@ -554,6 +610,9 @@ async def process_image_editing(message: types.Message, state: FSMContext):
     image_data = data.get("image_edit_data")
     instructions = data.get("image_edit_instructions")
     
+    # Store the original message ID to reply to it later
+    original_message_id = message.message_id
+    
     if not image_data or not instructions:
         await message.reply("🚨 Не удалось получить данные изображения или инструкции по редактированию")
         await state.set_state(Form.waiting_for_message)
@@ -606,11 +665,16 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                     instructions = translated_prompt
                     await bot.send_message(
                         user_id, 
-                        f"🔔 Ваш запрос был переведен на английский для лучших результатов:\n'{original_prompt}' → '{instructions}'"
+                        f"🔔 Ваш запрос был переведен на английский для лучших результатов:\n'{original_prompt}' → '{instructions}'",
+                        reply_to_message_id=original_message_id
                     )
             except Exception as e:
                 logging.error(f"Error during prompt translation: {e}")
-                await bot.send_message(user_id, f"⚠️ Не удалось перевести запрос на английский: {e}")
+                await bot.send_message(
+                    user_id, 
+                    f"⚠️ Не удалось перевести запрос на английский: {e}",
+                    reply_to_message_id=original_message_id
+                )
     
             contents = [instructions, *pil_images]
 
@@ -628,7 +692,8 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             if response is None:
                 await bot.send_message(
                     user_id, 
-                    "🚨 Превышено время ожидания при редактировании изображения. Пожалуйста, попробуйте еще раз."
+                    "🚨 Превышено время ожидания при редактировании изображения. Пожалуйста, попробуйте еще раз.",
+                    reply_to_message_id=original_message_id
                 )
                 await state.set_state(Form.waiting_for_message)
                 return
@@ -648,7 +713,11 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 error_message = "🚨 Модель не сгенерировала отредактированное изображение в ответе."
                 if text_response:
                     error_message += "\n\nОтвет модели: " + text_response[:3000]
-                await bot.send_message(user_id, error_message)
+                await bot.send_message(
+                    user_id, 
+                    error_message,
+                    reply_to_message_id=original_message_id
+                )
                 await state.set_state(Form.waiting_for_message)
                 return
             
@@ -657,25 +726,36 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 user_id,
                 photo=types.BufferedInputFile(edited_image_data, filename="edited_image.jpg"),
                 caption=caption,
+                reply_to_message_id=original_message_id
             )
             
             if text_response:
-                await bot.send_message(user_id, text_response)
+                await bot.send_message(
+                    user_id, 
+                    text_response,
+                    reply_to_message_id=original_message_id
+                )
             
             await bot.send_document(
                 user_id, 
                 document=types.BufferedInputFile(edited_image_data, filename="edited_image.jpg"), 
-                caption="Отредактированное изображение без сжатия"
+                caption="Отредактированное изображение без сжатия",
+                reply_to_message_id=original_message_id
             )
             
         except Exception as e:
             logging.error(f"Error during image editing: {e}")
             error_message = f"🚨 Ошибка при редактировании изображения: {str(e)[:200]}"
-            await bot.send_message(user_id, error_message)
+            await bot.send_message(
+                user_id, 
+                error_message,
+                reply_to_message_id=original_message_id
+            )
     else:
         await bot.send_message(
             user_id, 
-            "🚨 Редактирование изображений поддерживается только моделями Google AI. Пожалуйста, измените модель в настройках."
+            "🚨 Редактирование изображений поддерживается только моделями Google AI. Пожалуйста, измените модель в настройках.",
+            reply_to_message_id=original_message_id
         )
     
     end_time = time.time()
@@ -683,7 +763,11 @@ async def process_image_editing(message: types.Message, state: FSMContext):
     formatted_processing_time = str(timedelta(seconds=int(processing_time)))
     
     if user_context.get("show_processing_time", True):
-        await bot.send_message(user_id, f"⏳ Время обработки запроса: {formatted_processing_time}")
+        await bot.send_message(
+            user_id, 
+            f"⏳ Время обработки запроса: {formatted_processing_time}",
+            reply_to_message_id=original_message_id
+        )
     
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_edit_data=None)

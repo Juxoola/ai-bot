@@ -12,6 +12,15 @@ import logging
 import json
 import importlib
 import httpx
+
+# Monkey patch для PerplexityLabs - установка working = True
+try:
+    from g4f.Provider import PerplexityLabs
+    PerplexityLabs.working = True
+    logging.info("Monkey patch применен: PerplexityLabs.working = True")
+except ImportError:
+    logging.error("Не удалось импортировать PerplexityLabs для применения monkey patch")
+
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
 DEFAULT_SYSTEM_PROMPTS = {
@@ -98,6 +107,7 @@ class Form(StatesGroup):
     waiting_for_role_selection = State()
     playing_tictactoe = State()
     playing_guess_number = State()
+    in_progress = State()  # New state for handling in-progress operations
 
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -119,7 +129,12 @@ for provider, cfg in providers_config.items():
     if not api_key or not base_url:
         logging.warning(f"Для провайдера {provider} не задан 'api_key' или 'base_url'. Пропускаем.")
         continue
-    openai_clients[provider] = openai.OpenAI(api_key=api_key, base_url=base_url, http_client = httpx.Client(verify=False))
+    
+    openai_clients[provider] = openai.OpenAI(
+        api_key=api_key, 
+        base_url=base_url, 
+        max_retries=0
+    )
 
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -208,7 +223,6 @@ g4f_image_client_providers = get_supported_providers(image_providers)
 g4f_client = Client(provider=RetryProvider(g4f_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
 
 g4f_image_client = Client(provider=RetryProvider(g4f_image_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
-
 
 
 def update_g4f_clients(model_name=None):
