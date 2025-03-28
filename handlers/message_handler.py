@@ -4,7 +4,8 @@ from aiogram.enums import ParseMode
 
 from config import Form, dp, openai_clients, update_image_client_for_recognition
 from database import load_context, is_allowed, rec_models
-from func.g4f import handle_files_or_urls, handle_image_recognition
+from func.g4f import handle_image_recognition
+from func.files import handle_files_or_urls
 from func.gemini import handle_document_with_conversion, handle_image, process_custom_image_prompt
 from func.openai_image import handle_image_openai, process_custom_image_prompt_openai
 from func.messages import handle_all_messages
@@ -58,7 +59,7 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
             elif api_type == "gemini":
                 await handle_document_with_conversion(message, state)
             else:
-                await message.reply("🔔Обработка файлов не поддерживается данной моделью.")
+                await message.reply("🚨Обработка файлов не поддерживается данной моделью.")
             await clear_in_progress(state)
             return
 
@@ -90,9 +91,9 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
                         await state.set_state(Form.waiting_for_image_and_prompt_openai)
                         await handle_image_openai(message, state)
                 else:
-                    await message.reply("🔔Распознавание изображений настроено, но обработчик не найден.")
+                    await message.reply("🚨Распознавание изображений настроено, но обработчик не найден.")
             else:
-                await message.reply("🔔Распознавание изображений не поддерживается этой моделью.")
+                await message.reply("🚨Распознавание изображений не поддерживается этой моделью.")
             await clear_in_progress(state)
             return
 
@@ -119,4 +120,4 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         await clear_in_progress(state)
     except Exception as e:
         await clear_in_progress(state)
-        await message.reply(f"🔔Произошла ошибка: {e}") 
+        await message.reply(f"🚨Произошла ошибка: {e}") 

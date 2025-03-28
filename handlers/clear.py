@@ -56,7 +56,7 @@ async def cmd_clear_context(message: types.Message, state: FSMContext):
             new_context["messages"] = [{"role": "system", "content": system_prompt}]
 
         await save_context(user_id, new_context)
-        await message.reply("✅ Контекст очищен.")
+        await message.reply("Контекст очищен.")
         
         await clear_in_progress(state)
     except Exception as e:

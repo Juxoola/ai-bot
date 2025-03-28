@@ -1,10 +1,9 @@
 from aiogram import types, F
-from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 from config import Form, bot, dp
-from database import is_allowed, load_context, rec_models
-from func.g4f import process_image_generation_prompt, process_image_editing
+from database import is_allowed
+from func.image_gen import process_image_generation_prompt, process_image_editing
 from handlers.check import check_in_progress, set_in_progress, clear_in_progress
 from handlers.rate_limit import check_rate_limit
 

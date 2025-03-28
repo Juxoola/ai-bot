@@ -76,9 +76,6 @@ async def handle_long_message_handler(message: types.Message, state: FSMContext)
     if not is_allowed(message.from_user.id):
         await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
         return
-    
-    if not await check_rate_limit(message, "handle_long_message"):
-        return
         
     can_proceed = await check_in_progress(message, state)
     if not can_proceed:

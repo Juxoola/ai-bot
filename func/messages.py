@@ -19,6 +19,7 @@ from pydub import AudioSegment
 
 DEFAULT_API_TIMEOUT = 60
 AUDIO_API_TIMEOUT = 120
+EXTENDED_API_TIMEOUT = 240
 
 # Список Markdown-символов, которые нужно отслеживать
 MARKDOWN_SYMBOLS = ['**', '__', '*', '_', '```', '`']
@@ -295,8 +296,13 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                     )
 
                 if should_bypass_timeout(model_id, api_type):
-                    response = await asyncio.to_thread(g4f_request)
-                    logging.info(f"Запрос к {api_type} API с моделью {model_id} выполнен без таймаута{' в режиме длинного сообщения' if is_long_message else ''}")
+                    try:
+                        response = await async_run_with_timeout(g4f_request, EXTENDED_API_TIMEOUT)
+                        logging.info(f"Запрос к {api_type} API с моделью {model_id} выполнен с расширенным таймаутом {EXTENDED_API_TIMEOUT} сек{' в режиме длинного сообщения' if is_long_message else ''}")
+                    except TimeoutError as e:
+                        logging.error(f"Timeout in g4f_request{' (long message)' if is_long_message else ''}: {e}")
+                        await message.reply(f"🕒 Превышено время ожидания ответа ({EXTENDED_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
+                        response = None
                 else:
                     try:
                         response = await async_run_with_timeout(g4f_request, DEFAULT_API_TIMEOUT)
@@ -348,8 +354,13 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
             logging.info(f"[{current_time}] Начало запроса к Gemini API{' (длинное сообщение)' if is_long_message else ''}")
             
             if should_bypass_timeout(model_id, api_type):
-                response = await asyncio.to_thread(gemini_request)
-                logging.info(f"Запрос к {api_type} API с моделью {model_id} выполнен без таймаута{' в режиме длинного сообщения' if is_long_message else ''}")
+                try:
+                    response = await async_run_with_timeout(gemini_request, EXTENDED_API_TIMEOUT)
+                    logging.info(f"Запрос к {api_type} API с моделью {model_id} выполнен с расширенным таймаутом {EXTENDED_API_TIMEOUT} сек{' в режиме длинного сообщения' if is_long_message else ''}")
+                except TimeoutError as e:
+                    logging.error(f"Timeout in gemini_request{' (long message)' if is_long_message else ''}: {e}")
+                    await message.reply(f"🕒 Превышено время ожидания ответа ({EXTENDED_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
+                    response = None
             else:
                 try:
                     response = await async_run_with_timeout(gemini_request, DEFAULT_API_TIMEOUT)
@@ -465,11 +476,11 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
             else:
                 if should_bypass_timeout(model_id, api_type):
                     try:
-                        result = await asyncio.to_thread(call_openai_completion_sync, api_type, model_id, user_context["messages"])
-                        logging.info(f"Запрос к {api_type} API с моделью {model_id} выполнен без таймаута{' в режиме длинного сообщения' if is_long_message else ''}")
-                    except Exception as e:
-                        logging.error(f"Ошибка при выполнении запроса к {api_type} API{' в режиме длинного сообщения' if is_long_message else ''}: {e}")
-                        await message.reply(f"🚨 Ошибка при выполнении запроса: {e}")
+                        result = await async_run_with_timeout(call_openai_completion_sync, EXTENDED_API_TIMEOUT, api_type, model_id, user_context["messages"])
+                        logging.info(f"Запрос к {api_type} API с моделью {model_id} выполнен с расширенным таймаутом {EXTENDED_API_TIMEOUT} сек{' в режиме длинного сообщения' if is_long_message else ''}")
+                    except TimeoutError as e:
+                        logging.error(f"Timeout in openai_client request{' (long message)' if is_long_message else ''}: {e}")
+                        await message.reply(f"🕒 Превышено время ожидания ответа ({EXTENDED_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
                         result = None
                 else:
                     try:

@@ -11,7 +11,6 @@ import os
 import logging
 import json
 import importlib
-import httpx
 
 # Monkey patch для PerplexityLabs - установка working = True
 try:
@@ -107,7 +106,7 @@ class Form(StatesGroup):
     waiting_for_role_selection = State()
     playing_tictactoe = State()
     playing_guess_number = State()
-    in_progress = State()  # New state for handling in-progress operations
+    in_progress = State() 
 
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
