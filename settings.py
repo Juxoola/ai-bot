@@ -93,21 +93,6 @@ async def select_image_gen_model_handler(callback_query: types.CallbackQuery, st
     )
     await state.set_state(Form.waiting_for_image_generation_model)
 
-async def select_image_rec_model_handler(callback_query: types.CallbackQuery, state: FSMContext):
-    IMAGE_RECOGNITION_MODELS = await rec_models()
-    
-    keyboard, model_map = await get_image_recognition_model_selection_keyboard(IMAGE_RECOGNITION_MODELS)
-    
-    await state.update_data(image_rec_model_map=model_map)
-
-    await bot.edit_message_text(
-        "Выберите модель для распознавания изображений:",
-        chat_id=callback_query.message.chat.id,
-        message_id=callback_query.message.message_id,
-        reply_markup=keyboard
-    )
-    await state.set_state(Form.waiting_for_image_recognition_model)
-
 async def select_aspect_ratio_handler(callback_query: types.CallbackQuery, state: FSMContext):
     keyboard = await get_aspect_ratio_selection_keyboard()
 
@@ -287,29 +272,6 @@ async def process_image_generation_model_handler(callback_query, state):
     await bot.answer_callback_query(
         callback_query.id,
         text=f"Модель для генерации изображений изменена на {model_id} ({api})"
-    )
-
-async def process_image_recognition_model_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
-    user_id = callback_query.from_user.id
-    short_id = callback_query.data.split("rec_model_")[1]
-    
-    data = await state.get_data()
-    model_map = data.get("image_rec_model_map", {})
-    
-    if short_id not in model_map:
-        await bot.answer_callback_query(callback_query.id, text="Модель не найдена")
-        return
-        
-    model_name = model_map[short_id]
-    
-    user_context = await load_context(user_id)
-    user_context["image_recognition_model"] = model_name
-    
-    await update_setting_and_refresh_keyboard(callback_query, state, user_context)
-    
-    await bot.answer_callback_query(
-        callback_query.id,
-        text=f"Модель распознавания изменена на {model_name}"
     )
 
 async def process_aspect_ratio_selection_handler(callback_query, state):
