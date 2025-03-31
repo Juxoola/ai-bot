@@ -1,6 +1,6 @@
 from aiogram.fsm.context import FSMContext
-from config import get_client, Form, openai_clients, DEFAULT_SYSTEM_PROMPTS
-from func.messages import send_message_in_parts
+from config import get_client, Form, openai_clients, anthropic_clients, DEFAULT_SYSTEM_PROMPTS
+from func.messages import send_message_in_parts, call_anthropic_completion_sync
 from database import load_context, save_context
 from aiogram import types
 import asyncio
@@ -207,6 +207,35 @@ async def process_search_query(message: types.Message, state: FSMContext):
 
             if result:
                 response_text = result.choices[0].message.content
+                
+        elif api_type in anthropic_clients:
+            # Конвертируем формат сообщений OpenAI в формат Anthropic
+            anthropic_messages = []
+            system_content = None
+            
+            # Извлекаем системное сообщение, если оно есть
+            if user_context["messages"] and user_context["messages"][0]["role"] == "system":
+                system_content = user_context["messages"][0]["content"]
+            
+            # Добавляем все сообщения кроме системного
+            for msg in user_context["messages"]:
+                role = msg["role"]
+                if role == "system":
+                    continue
+                anthropic_messages.append({"role": role, "content": msg["content"]})
+                        
+            try:
+                result = await async_run_with_timeout(
+                    lambda: call_anthropic_completion_sync(api_type, model_id, anthropic_messages, system=system_content),
+                    DEFAULT_API_TIMEOUT
+                )
+            except TimeoutError as e:
+                logging.error(f"Timeout in anthropic_client request (long message): {e}")
+                await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
+                result = None
+
+            if result:
+                response_text = result.content[0].text
 
         elif api_type == "g4f":
             def g4f_request():

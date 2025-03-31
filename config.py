@@ -2,6 +2,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import State, StatesGroup
 from aiogram import Bot, Dispatcher
 import openai
+import anthropic
 import google.generativeai as genai
 from g4f.client import Client
 from g4f.Provider import RetryProvider
@@ -98,6 +99,8 @@ class Form(StatesGroup):
     waiting_for_message_to_user = State()   
     waiting_for_image_and_prompt_openai = State()
     waiting_for_custom_image_prompt_openai = State()
+    waiting_for_image_and_prompt_anthropic = State()
+    waiting_for_custom_image_prompt_anthropic = State()
     waiting_for_new_image_rec_model_id = State()
     waiting_for_new_image_rec_model_api = State()
     waiting_for_image_edit_instructions = State()
@@ -133,6 +136,27 @@ for provider, cfg in providers_config.items():
         api_key=api_key, 
         base_url=base_url, 
         max_retries=0
+    )
+
+anthropic_clients = {}
+anthropic_providers_json = os.environ.get("ANTHROPIC_PROVIDERS", "")
+anthropic_providers_json = anthropic_providers_json.strip("'")
+try:
+    anthropic_providers_config = json.loads(anthropic_providers_json)
+except json.JSONDecodeError as e:
+    logging.error("Ошибка при разборе ANTHROPIC_PROVIDERS: %s", e)
+    anthropic_providers_config = {}
+
+for provider, cfg in anthropic_providers_config.items():
+    api_key = cfg.get("api_key")
+    base_url = cfg.get("base_url", "https://api.anthropic.com")
+    if not api_key:
+        logging.warning(f"Для провайдера Anthropic {provider} не задан 'api_key'. Пропускаем.")
+        continue
+    
+    anthropic_clients[provider] = anthropic.Anthropic(
+        api_key=api_key,
+        base_url=base_url
     )
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -329,6 +353,13 @@ def get_openai_client(api_type: str):
     if not client:
         available = ", ".join(openai_clients.keys())
         raise ValueError(f"Неподдерживаемый тип OpenAI провайдера: {api_type}. Доступные: {available}")
+    return client
+
+def get_anthropic_client(api_type: str):
+    client = anthropic_clients.get(api_type)
+    if not client:
+        available = ", ".join(anthropic_clients.keys())
+        raise ValueError(f"Неподдерживаемый тип Anthropic провайдера: {api_type}. Доступные: {available}")
     return client
 
 def get_image_recognition_providers(model_name=None):

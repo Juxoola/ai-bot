@@ -1,5 +1,5 @@
 from aiogram.fsm.context import FSMContext
-from config import Form, bot, openai_clients
+from config import Form, bot, openai_clients, anthropic_clients
 import logging
 from database import is_admin,gen_models, av_models, rec_models,init_av_models, init_gen_models,init_rec_models,initialize_allowed_users,DATABASE_FILE, get_all_allowed_users
 from keyboards import get_image_gen_model_selection_keyboard,get_image_recognition_model_selection_keyboard, get_model_selection_keyboard
@@ -75,7 +75,7 @@ async def process_new_model_name(message: types.Message, state: FSMContext):
 async def process_new_model_id(message: types.Message, state: FSMContext):
     model_id = message.text
     await state.update_data(new_model_id=model_id)
-    allowed_apis = list(openai_clients.keys()) + ["gemini" , "g4f"]
+    allowed_apis = list(openai_clients.keys()) + list(anthropic_clients.keys()) + ["gemini" , "g4f"]
     available = ", ".join(allowed_apis)
     await message.reply(f"Введите тип API новой модели для чата {available}:")
     await state.set_state(Form.waiting_for_new_model_api)
@@ -84,7 +84,7 @@ async def process_new_model_api(message: types.Message, state: FSMContext):
     model_api = message.text.lower()
 
 
-    allowed_apis = list(openai_clients.keys()) + ["gemini" , "g4f"]
+    allowed_apis = list(openai_clients.keys()) + list(anthropic_clients.keys()) + ["gemini" , "g4f"]
 
     if model_api not in allowed_apis:
         available = ", ".join(allowed_apis)
@@ -205,7 +205,7 @@ async def cmd_add_image_rec_model(message: types.Message, state: FSMContext):
 async def process_new_image_rec_model_id(message: types.Message, state: FSMContext):
     model_id = message.text
     await state.update_data(new_image_rec_model_id=model_id)
-    allowed_apis = list(openai_clients.keys()) + ["gemini" , "g4f"]
+    allowed_apis = list(openai_clients.keys()) + list(anthropic_clients.keys()) + ["gemini" , "g4f"]
     available = ", ".join(allowed_apis)
     await message.reply(f"Введите тип API для модели распознавания изображений {available}")
     await state.set_state(Form.waiting_for_new_image_rec_model_api)
@@ -213,7 +213,7 @@ async def process_new_image_rec_model_id(message: types.Message, state: FSMConte
 async def process_new_image_rec_model_api(message: types.Message, state: FSMContext):
     model_api = message.text.lower() 
     
-    allowed_apis = list(openai_clients.keys()) + ["gemini" , "g4f"]
+    allowed_apis = list(openai_clients.keys()) + list(anthropic_clients.keys()) + ["gemini" , "g4f"]
 
     if model_api not in allowed_apis:
         available = ", ".join(allowed_apis)

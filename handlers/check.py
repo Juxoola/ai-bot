@@ -43,6 +43,8 @@ async def clear_in_progress(state: FSMContext):
         Form.waiting_for_image_and_prompt_openai,
         Form.waiting_for_custom_image_prompt,
         Form.waiting_for_custom_image_prompt_openai,
+        Form.waiting_for_image_and_prompt_anthropic,
+        Form.waiting_for_custom_image_prompt_anthropic,
         Form.waiting_for_custom_image_recognition_prompt,
         Form.waiting_for_image_recognition_prompt,
         Form.waiting_for_long_message,

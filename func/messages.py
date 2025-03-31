@@ -1,5 +1,5 @@
 from aiogram.fsm.context import FSMContext
-from config import Form, get_client, get_openai_client, openai_clients, should_bypass_timeout, bot, DEFAULT_SYSTEM_PROMPTS
+from config import Form, get_client, get_openai_client, openai_clients, should_bypass_timeout, bot, DEFAULT_SYSTEM_PROMPTS, anthropic_clients, get_anthropic_client
 import tempfile
 import os
 from datetime import timedelta
@@ -499,6 +499,53 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                     if not is_long_message:
                         user_context["messages"].append({"role": "assistant", "content": response_text})
 
+        elif api_type in anthropic_clients:
+            try:
+                client = get_anthropic_client(api_type)
+                logging.info(f"Начало запроса к Anthropic API с моделью {model_id}")
+                
+                user_context = await load_context(user_id)
+                
+                anthropic_messages = []
+                system_content = None
+                
+                if user_context["messages"] and user_context["messages"][0]["role"] == "system":
+                    system_content = user_context["messages"][0]["content"]
+                
+                for msg in user_context["messages"]:
+                    if msg["role"] == "system":
+                        continue
+                    
+                    if msg["role"] in ["user", "assistant"]:
+                        anthropic_messages.append({"role": msg["role"], "content": msg["content"]})
+                
+                if not anthropic_messages:
+                    if message_text:
+                        anthropic_messages.append({"role": "user", "content": message_text})
+                    else:
+                        logging.error("Отсутствуют сообщения для отправки в Anthropic API")
+                        await message.reply("🚨 Ошибка: нет сообщений для отправки в API.")
+                        return None
+                elif anthropic_messages[-1]["role"] != "user" and message_text:
+                    anthropic_messages.append({"role": "user", "content": message_text})
+                
+                result = await async_run_with_timeout(
+                    lambda: call_anthropic_completion_sync(api_type, model_id, anthropic_messages, system=system_content),
+                    DEFAULT_API_TIMEOUT
+                )
+                
+                if result:
+                    response_text = result.content[0].text
+                    if not is_long_message:
+                        user_context["messages"].append({"role": "assistant", "content": response_text})
+                    
+            except TimeoutError as e:
+                logging.error(f"Timeout in Anthropic API request: {e}")
+                await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
+            except Exception as e:
+                logging.exception(f"Ошибка при вызове Anthropic API: {e}")
+                await message.reply(f"❌ Ошибка при обработке запроса: {e}")
+                
         if response_text:
             # Удаляем теги <think> и </think> из ответа модели
             response_text = response_text.replace("<think>", "").replace("</think>", "")
@@ -806,7 +853,31 @@ def call_openai_completion_sync(api_type, model, messages, **kwargs):
         logging.error(f"[{end_timestamp}] Ошибка при выполнении запроса к OpenAI API ({api_type}) с моделью {model} после {duration:.2f} секунд: {e}")
         raise
 
-
+def call_anthropic_completion_sync(api_type, model, messages, system=None, **kwargs):
+    """Синхронная версия для вызова Anthropic API, которая используется в async_run_with_timeout."""
+    client = get_anthropic_client(api_type)
+    start_time = time.time()
+    start_timestamp = time.strftime("%H:%M:%S", time.localtime(start_time))
+    logging.info(f"[{start_timestamp}] Начало запроса к Anthropic API ({api_type}) с моделью {model}.")
+    try:
+        result = client.messages.create(
+            model=model,
+            messages=messages,
+            system=system,
+            max_tokens=4096,
+            **kwargs
+        )
+        end_time = time.time()
+        duration = end_time - start_time
+        end_timestamp = time.strftime("%H:%M:%S", time.localtime(end_time))
+        logging.info(f"[{end_timestamp}] Запрос к Anthropic API ({api_type}) завершён за {duration:.2f} секунд.")
+        return result
+    except Exception as e:
+        end_time = time.time()
+        duration = end_time - start_time
+        end_timestamp = time.strftime("%H:%M:%S", time.localtime(end_time))
+        logging.error(f"[{end_timestamp}] Ошибка при выполнении запроса к Anthropic API ({api_type}) с моделью {model} после {duration:.2f} секунд: {e}")
+        raise
 
 def run_in_process(func, timeout, *args, **kwargs):
     """Запускает блокирующую функцию func в отдельном процессе с таймаутом.

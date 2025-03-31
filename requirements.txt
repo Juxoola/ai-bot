@@ -166,3 +166,4 @@ olefile
 cachetools
 pydub
 deep_translator
+anthropic

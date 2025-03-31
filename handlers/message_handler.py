@@ -2,12 +2,13 @@ from aiogram import types
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 
-from config import Form, dp, openai_clients, update_image_client_for_recognition
+from config import Form, dp, openai_clients, anthropic_clients, update_image_client_for_recognition
 from database import load_context, is_allowed, rec_models
 from func.g4f import handle_image_recognition
 from func.files import handle_files_or_urls
 from func.gemini import handle_document_with_conversion, handle_image, process_custom_image_prompt
 from func.openai_image import handle_image_openai, process_custom_image_prompt_openai
+from func.anthropic_image import handle_image_anthropic, process_custom_image_prompt_anthropic
 from func.messages import handle_all_messages
 from handlers.check import check_in_progress, set_in_progress, clear_in_progress
 from handlers.rate_limit import check_rate_limit
@@ -90,6 +91,12 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
                     else:
                         await state.set_state(Form.waiting_for_image_and_prompt_openai)
                         await handle_image_openai(message, state)
+                elif api_type in anthropic_clients:
+                    if current_state == Form.waiting_for_image_and_prompt_anthropic:
+                        await message.reply("🔔Пожалуйста, сначала введите текстовый промпт.")
+                    else:
+                        await state.set_state(Form.waiting_for_image_and_prompt_anthropic)
+                        await handle_image_anthropic(message, state)
                 else:
                     await message.reply("🚨Распознавание изображений настроено, но обработчик не найден.")
             else:
@@ -112,6 +119,16 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
             
             if message.text and model_supported:
                 await process_custom_image_prompt_openai(message, state)
+            else:
+                await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
+        elif current_state == Form.waiting_for_image_and_prompt_anthropic:
+            model_supported = False
+            lookup_key = f"{model_id}_{api_type}"
+            if lookup_key in image_rec_models:
+                model_supported = True
+            
+            if message.text and api_type in anthropic_clients:
+                await process_custom_image_prompt_anthropic(message, state)
             else:
                 await message.reply("🔔Пожалуйста, введите текстовый промпт к изображению.")
         else:
