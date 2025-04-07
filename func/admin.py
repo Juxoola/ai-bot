@@ -2,7 +2,7 @@ from aiogram.fsm.context import FSMContext
 from config import Form, bot, openai_clients, anthropic_clients
 import logging
 from database import is_admin,gen_models, av_models, rec_models,init_av_models, init_gen_models,init_rec_models,initialize_allowed_users,DATABASE_FILE, get_all_allowed_users
-from keyboards import get_image_gen_model_selection_keyboard,get_image_recognition_model_selection_keyboard, get_model_selection_keyboard
+from keyboards import get_image_gen_model_selection_keyboard,get_image_recognition_model_selection_keyboard, get_model_selection_keyboard, get_api_selection_keyboard, get_models_by_api_keyboard
 from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import aiosqlite
@@ -118,13 +118,13 @@ async def cmd_delete_model(message: types.Message, state: FSMContext):
         return
 
     AVAILABLE_MODELS = await av_models()
-    keyboard = await get_model_selection_keyboard(AVAILABLE_MODELS)
+    keyboard = await get_api_selection_keyboard(AVAILABLE_MODELS)
 
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete")])
 
-    msg = await message.reply("Выберите модель для удаления:", reply_markup=keyboard)
+    msg = await message.reply("Выберите API для удаления модели:", reply_markup=keyboard)
     await state.update_data(delete_model_message_id=msg.message_id) 
-    await state.set_state(Form.waiting_for_delete_model_name)
+    await state.set_state(Form.waiting_for_delete_model_api_selection)
 
 
 async def process_delete_model_name(callback_query: types.CallbackQuery, state: FSMContext):
@@ -160,6 +160,75 @@ async def process_delete_model_name(callback_query: types.CallbackQuery, state: 
         delete_model_api=api_type
     )
 
+    await bot.send_message(
+        callback_query.from_user.id,
+        f"Вы уверены, что хотите удалить модель '{AVAILABLE_MODELS[model_data]['model_name']}'? (да/нет)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Да", callback_data="confirm_delete_yes"),
+             InlineKeyboardButton(text="Нет", callback_data="confirm_delete_no")]
+        ])
+    )
+    await state.set_state(Form.waiting_for_confirmation)
+
+async def process_delete_model_api_selection(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.data == "cancel_delete":
+        await bot.answer_callback_query(callback_query.id)
+        await bot.send_message(callback_query.from_user.id, "Удаление модели отменено.")
+        await state.set_state(Form.waiting_for_message)
+        return
+    
+    selected_api = callback_query.data.split('_', 1)[1] if callback_query.data.startswith('api_') else callback_query.data
+    
+    data = await state.get_data()
+    delete_model_message_id = data.get("delete_model_message_id")
+    if delete_model_message_id:
+        try:
+            await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=delete_model_message_id)
+        except Exception as e:
+            logging.error(f"Ошибка при удалении сообщения: {e}")
+    
+    AVAILABLE_MODELS = await av_models()
+    keyboard = await get_models_by_api_keyboard(AVAILABLE_MODELS, selected_api)
+    
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete")])
+    
+    msg = await bot.send_message(callback_query.from_user.id, f"Выберите модель API {selected_api} для удаления:", reply_markup=keyboard)
+    await state.update_data(delete_model_message_id=msg.message_id) 
+    await state.set_state(Form.waiting_for_delete_model_by_api)
+
+async def process_delete_model_by_api(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.data == "cancel_delete":
+        await bot.answer_callback_query(callback_query.id)
+        await bot.send_message(callback_query.from_user.id, "Удаление модели отменено.")
+        await state.set_state(Form.waiting_for_message)
+        return
+    
+    model_data = callback_query.data.split('_', 1)[1] if callback_query.data.startswith('model_') else callback_query.data
+    
+    data = await state.get_data()
+    delete_model_message_id = data.get("delete_model_message_id")
+    if delete_model_message_id:
+        try:
+            await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=delete_model_message_id)
+        except Exception as e:
+            logging.error(f"Ошибка при удалении сообщения: {e}")
+    
+    AVAILABLE_MODELS = await av_models()
+    if model_data not in AVAILABLE_MODELS:
+        await bot.answer_callback_query(callback_query.id)
+        await bot.send_message(callback_query.from_user.id, "Модель не найдена.")
+        await state.set_state(Form.waiting_for_message)
+        return
+    
+    model_id = model_data.split('_')[0]
+    api_type = AVAILABLE_MODELS[model_data]['api']
+    
+    await state.update_data(
+        delete_model_name=AVAILABLE_MODELS[model_data]['model_name'],
+        delete_model_id=model_id,
+        delete_model_api=api_type
+    )
+    
     await bot.send_message(
         callback_query.from_user.id,
         f"Вы уверены, что хотите удалить модель '{AVAILABLE_MODELS[model_data]['model_name']}'? (да/нет)",

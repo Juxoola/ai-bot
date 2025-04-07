@@ -16,8 +16,8 @@ from func.admin import (cmd_send_to_all, process_message_to_all, cmd_send_to_use
                         cmd_add_image_gen_model, cmd_delete_image_gen_model, 
                         process_delete_image_gen_model_name, process_confirm_delete_image_gen_model,
                         process_new_image_rec_model_id, process_new_image_rec_model_api,
-                        process_new_image_gen_model_id, 
-                        process_new_image_gen_model_api)
+                        process_new_image_gen_model_id, process_new_image_gen_model_api,
+                        process_delete_model_api_selection, process_delete_model_by_api)
 
 
 @dp.message(F.text == "Открыть админ-клавиатуру")
@@ -267,3 +267,19 @@ async def process_new_image_gen_model_api_handler(message: types.Message, state:
         return
         
     await process_new_image_gen_model_api(message, state)
+
+@dp.callback_query(Form.waiting_for_delete_model_api_selection)
+async def process_delete_model_api_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    if not is_admin(callback_query.from_user.id):
+        await callback_query.answer("Извините, у вас нет прав для выполнения этого действия.")
+        return
+        
+    await process_delete_model_api_selection(callback_query, state)
+
+@dp.callback_query(Form.waiting_for_delete_model_by_api)
+async def process_delete_model_by_api_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    if not is_admin(callback_query.from_user.id):
+        await callback_query.answer("Извините, у вас нет прав для выполнения этого действия.")
+        return
+        
+    await process_delete_model_by_api(callback_query, state)

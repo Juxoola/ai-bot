@@ -62,6 +62,8 @@ class Form(StatesGroup):
     waiting_for_new_model_id = State()
     waiting_for_new_model_api = State()
     waiting_for_delete_model_name = State()
+    waiting_for_delete_model_api_selection = State()
+    waiting_for_delete_model_by_api = State()
     waiting_for_confirmation = State()
     waiting_for_image = State()
     waiting_for_enhance = State()
