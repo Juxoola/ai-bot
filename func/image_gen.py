@@ -334,7 +334,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     
         try:
             def generate_g4f_content():
-                lambda: image_gen_client.images.generate(
+                return image_gen_client.images.generate(
                     prompt=prompt,
                     model=model_id,
                     response_format="url",
