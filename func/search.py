@@ -272,7 +272,6 @@ async def process_search_query(message: types.Message, state: FSMContext):
                     system_instruction = DEFAULT_SYSTEM_PROMPTS["default"]
                 
                 if system_instruction:
-                    from google.genai import types as genai_types
                     gemini_model = genai.GenerativeModel(
                         model_id,
                         system_instruction=system_instruction

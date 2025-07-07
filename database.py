@@ -92,7 +92,7 @@ DEFAULT_WHISPER_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]
 
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
-DEFAULT_MODEL = "deepseek-v3"
+DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_IMAGE_GEN_MODEL = "flux_poli"
 DEFAULT_IMAGE_RECOGNITION_MODEL = "gemini-2.0-flash"
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"

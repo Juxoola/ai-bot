@@ -35,7 +35,6 @@ async def set_in_progress(state: FSMContext):
 
 async def clear_in_progress(state: FSMContext):
     current_state = await state.get_state()
-    # Special states that should be preserved instead of being reset
     special_states = [
         Form.playing_tictactoe, 
         Form.playing_guess_number,
@@ -48,6 +47,8 @@ async def clear_in_progress(state: FSMContext):
         Form.waiting_for_custom_image_recognition_prompt,
         Form.waiting_for_image_recognition_prompt,
         Form.waiting_for_long_message,
+        Form.waiting_for_audio,
+        Form.waiting_for_whisper_model_selection
     ]
     
     if current_state not in special_states:

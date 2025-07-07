@@ -1,6 +1,5 @@
 import base64
 import logging
-import asyncio
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 from config import Form, get_anthropic_client, bot

@@ -13,6 +13,7 @@ import logging
 import json
 import importlib
 
+
 # Monkey patch для PerplexityLabs - установка working = True
 try:
     from g4f.Provider import PerplexityLabs
@@ -315,7 +316,7 @@ def get_client(user_id, client_type="g4f_client", model_name=None):
 
 
 enhance_prompt_client = None
-model_name_e = "deepseek-v3"  
+model_name_e = "gpt-4o"  
 
 async def init_enhance_prompt_client():
     
@@ -330,7 +331,7 @@ async def init_enhance_prompt_client():
     logging.info(f"Enhance prompt client initialized with model {model_name_e}")
 
 
-async def update_image_gen_client(user_id, image_gen_model):
+def update_image_gen_client(user_id, image_gen_model):
 
     global user_clients
     from g4f.client import Client

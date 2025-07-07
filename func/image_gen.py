@@ -1,6 +1,6 @@
-from config import bot, get_client,Form, openai_clients, model_name_e
+from config import bot, get_client,Form, openai_clients
 import config
-from key import GEMINI_API_KEY
+from key import GEMINI_API_KEY, CHUTES_API_TOKEN
 from aiogram.fsm.context import FSMContext
 from database import load_context,def_enhance, def_gen_model, def_aspect
 from aiogram import types
@@ -20,9 +20,11 @@ from .messages import DEFAULT_API_TIMEOUT
 import requests
 from deep_translator import GoogleTranslator
 
+
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
-google_ai_models = ["gemini-2.0-flash-exp"]
+google_ai_models = ["gemini-2.0-flash-preview-image-generation"]
+chutes_models = ["chroma", "hidream"]
 
 if GEMINI_API_KEY:
     genai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -30,6 +32,8 @@ else:
     genai_client = None
     logging.warning("GEMINI_API_KEY is not set. Google AI image generation will be unavailable.")
 
+if not CHUTES_API_TOKEN:
+    logging.warning("CHUTES_API_TOKEN is not set. Chutes AI image generation will be unavailable.")
 
 async def process_image_generation_prompt(message: types.Message, state: FSMContext):
     start_time = time.time()
@@ -129,7 +133,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             improved_prompt = await asyncio.to_thread(
                 lambda:
                     config.enhance_prompt_client.chat.completions.create(
-                        model=model_name_e,
+                        model=config.model_name_e,
                         messages=[
                             {"role": "user", "content": f"You are a text prompt generator for creating images. I will give you a post topic, and you will generate one best-quality prompt and show it to me.\n\n{prompt}\n\nDo not ask for clarifications—just generate the best prompt using your creativity, and I will request changes if needed.\n\n### Prompt Structure:\n- Camera angle → Scene description → Character description → Camera settings\n- Character descriptions must always be separated by commas.\n- All parts of the structure must be separated by commas.\n\n### Notes:\n- At the end of the prompt, you may also include the camera type (if it's not a painting style), such as DSLR, Nikon D, Canon EOS R3, etc.\n- You can specify a lens type (e.g., 14mm focal length, 35mm, fisheye, wide-angle, etc.) if necessary.\n\n### Example Formatting:\n- Highly detailed watercolor painting, majestic lion, intricate fur detail, photograph, natural lighting, brush strokes, watercolor splatters\n- Portrait photo of a red-haired girl standing in water covered with lily pads, long braided hair, Canon EOS R3, volumetric lighting\n- Wide-angle, stunning sunset over a wide open beach, vibrant pink-orange and gold sky, water reflecting sunset colors, mesmerizing effect, lone tall tree in foreground, tree silhouetted against sunset, dramatic feel, Canon EOS R3, landscape scene\n- Watercolor painting, family of elephants roaming the savanna, delicate brush strokes, soft colors, Canon EOS R3, wide-angle lens\n\n### IMPORTANT:\nGenerate the best possible prompt immediately in English, and show only the prompt. Do not write anything else."}
                         ],
@@ -197,7 +201,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 )
                 break 
 
-    elif api_type in openai_clients and api_type != "poli":
+    elif api_type in openai_clients and api_type != "poli" and api_type != "chutes":
         client = openai_clients.get(api_type)
         try:
             size_str = f"{width}x{height}"
@@ -265,7 +269,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                         model=model_id,
                         contents=prompt,
                         config=genai_types.GenerateContentConfig(
-                            response_modalities=['Text', 'Image']
+                            response_modalities=['TEXT', 'IMAGE']
                         )
                     )
                 
@@ -277,13 +281,19 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 image_data = None
                 text_response = ""
                 
-                if hasattr(response, 'candidates') and response.candidates and hasattr(response.candidates[0], 'content'):
-                    for part in response.candidates[0].content.parts:
-                        if part.text:
-                            text_response += part.text
-                        
-                        if part.inline_data is not None and part.inline_data.mime_type.startswith('image/'):
-                            image_data = part.inline_data.data
+                for part in response.candidates[0].content.parts:
+                    if part.text is not None:
+                        text_response += part.text
+                    
+                    elif part.inline_data is not None and part.inline_data.mime_type.startswith('image/'):
+                        image = await asyncio.to_thread(
+                            lambda: Image.open(BytesIO(part.inline_data.data))
+                        )
+                        img_byte_arr = BytesIO()
+                        await asyncio.to_thread(
+                            lambda: image.save(img_byte_arr, format='JPEG')
+                        )
+                        image_data = img_byte_arr.getvalue()
                 
                 if not image_data:
                     error_message = "🚨Модель не сгенерировала изображение в ответе."
@@ -377,6 +387,112 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 reply_to_message_id=original_message_id
             )
 
+    elif api_type == "chutes":
+        if not CHUTES_API_TOKEN:
+            await bot.send_message(
+                user_id, 
+                "🚨Генерация изображений через Chutes недоступна. API-ключ не настроен.",
+                reply_to_message_id=original_message_id
+            )
+            return
+            
+        try:
+            headers = {
+                "Authorization": f"Bearer {CHUTES_API_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            
+            if model_id == "chroma":
+                api_endpoint = "https://chutes-chroma.chutes.ai/generate"
+                payload = {
+                    "cfg": 4.5,
+                    "seed": random.randint(0, 1000000),
+                    "steps": 30,
+                    "width": width,
+                    "height": height,
+                    "prompt": prompt
+                }
+            elif model_id == "hidream":
+                api_endpoint = "https://chutes-hidream.chutes.ai/generate"
+                payload = {
+                    "seed": random.randint(0, 1000000),
+                    "prompt": prompt,
+                    "resolution": f"{width}x{height}",
+                    "guidance_scale": 5,
+                    "num_inference_steps": 50
+                }
+            else:
+                await bot.send_message(
+                    user_id, 
+                    f"🚨Неизвестная модель Chutes: {model_id}",
+                    reply_to_message_id=original_message_id
+                )
+                return
+                
+            async def generate_chutes_content():
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(api_endpoint, json=payload, headers=headers) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            raise Exception(f"API вернул ошибку: {response.status}, {error_text}")
+                        
+                        content_type = response.headers.get('Content-Type', '')
+                        if content_type.startswith('image/'):
+                            # API returns the image directly
+                            return await response.read()
+                        else:
+                            # Try to parse as JSON if not a direct image
+                            try:
+                                response_data = await response.json()
+                                if "image" in response_data:
+                                    import base64
+                                    return base64.b64decode(response_data["image"])
+                                else:
+                                    raise Exception("Изображение не найдено в ответе")
+                            except aiohttp.ContentTypeError:
+                                # If not JSON and not identified as image, return raw content
+                                return await response.read()
+            
+            image_data = await async_run_with_timeout(generate_chutes_content, DEFAULT_API_TIMEOUT * 2)
+            
+            if image_data is None:
+                await bot.send_message(
+                    user_id, 
+                    "🚨Превышено время ожидания при генерации изображения",
+                    reply_to_message_id=original_message_id
+                )
+                return
+                
+            caption = f"Фото сгенерировано Chutes моделью {model_id}"
+            if aspect_ratio:
+                caption += f" с соотношением сторон {aspect_ratio}"
+            if enhance:
+                caption += f", enhance: {enhance}"
+            caption += ":"
+            
+            await bot.send_photo(
+                user_id,
+                photo=types.BufferedInputFile(image_data, filename="image.jpg"),
+                caption=caption,
+                reply_to_message_id=original_message_id
+            )
+            
+            caption2 = "Фото без сжатия"
+            await bot.send_document(
+                user_id, 
+                document=types.BufferedInputFile(image_data, filename="image.jpg"), 
+                caption=caption2,
+                reply_to_message_id=original_message_id
+            )
+            
+        except Exception as e:
+            logging.error(f"Error during Chutes image generation: {e}")
+            await bot.send_message(
+                user_id, 
+                f"🚨Ошибка во время генерации изображения с помощью Chutes API: {e}",
+                reply_to_message_id=original_message_id
+            )
+
     end_time = time.time()
     processing_time = end_time - start_time
     formatted_processing_time = str(timedelta(seconds=int(processing_time)))
@@ -394,8 +510,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     await state.update_data(aspect_ratio=None)
     await state.update_data(enhance=None)
     await state.update_data(original_message_id=None)
-
-
 
 
 
@@ -480,7 +594,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                     model=model_id,
                     contents=contents,
                     config=genai_types.GenerateContentConfig(
-                        response_modalities=['Text', 'Image']
+                        response_modalities=['TEXT', 'IMAGE']
                     )
                 )
             
@@ -500,11 +614,19 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             
             if hasattr(response, 'candidates') and response.candidates and hasattr(response.candidates[0], 'content'):
                 for part in response.candidates[0].content.parts:
-                    if hasattr(part, 'text') and part.text:
+                    if hasattr(part, 'text') and part.text is not None:
                         text_response += part.text
                     
-                    if hasattr(part, 'inline_data') and part.inline_data and part.inline_data.mime_type.startswith('image/'):
-                        edited_image_data = part.inline_data.data
+                    elif hasattr(part, 'inline_data') and part.inline_data and part.inline_data.mime_type.startswith('image/'):
+                        # Convert image data to bytes
+                        image = await asyncio.to_thread(
+                            lambda: Image.open(BytesIO(part.inline_data.data))
+                        )
+                        img_byte_arr = BytesIO()
+                        await asyncio.to_thread(
+                            lambda: image.save(img_byte_arr, format='JPEG')
+                        )
+                        edited_image_data = img_byte_arr.getvalue()
             
             if not edited_image_data:
                 error_message = "🚨 Модель не сгенерировала отредактированное изображение в ответе."

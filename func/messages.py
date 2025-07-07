@@ -261,10 +261,23 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
             if user_context["g4f_image"] and (not is_long_message or model_id == user_context["image_recognition_model"]):
                 def g4f_image_request():
                     user_g4f_client = get_client(user_id, "g4f_image_client", model_name=model_id)
+                    
+                    # BytesIO to base64
+                    image_data = user_context["g4f_image"]
+                    if hasattr(image_data, 'read') and not isinstance(image_data, str):
+                        if hasattr(image_data, 'seek'):
+                            image_data.seek(0)
+                        image_bytes = image_data.read()
+                        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                        image_data_uri = f"data:image/jpeg;base64,{image_b64}"
+                        image_to_use = image_data_uri
+                    else:
+                        image_to_use = image_data
+                    
                     return user_g4f_client.chat.completions.create(
                         model=model_id,
                         messages=user_context["messages"] if not is_long_message else [{"role": "user", "content": message_text}],
-                        image=user_context["g4f_image"],
+                        image=image_to_use,
                     )
 
                 current_time = time.strftime("%H:%M:%S", time.localtime())

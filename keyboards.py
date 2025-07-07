@@ -5,24 +5,24 @@ from config import DEFAULT_SYSTEM_PROMPTS
 async def get_admin_keyboard():
     keyboard = [
         [
-            KeyboardButton(text="/add_model"),
-            KeyboardButton(text="/delete_model")
+            KeyboardButton(text="➕ Добавить модель"),
+            KeyboardButton(text="❌ Удалить модель")
         ],
         [
-            KeyboardButton(text="/add_image_gen_model"),
-            KeyboardButton(text="/delete_image_gen_model")
+            KeyboardButton(text="➕ Добавить модель генерации"),
+            KeyboardButton(text="❌ Удалить модель генерации")
         ],
         [
-            KeyboardButton(text="/add_image_rec_model"),
-            KeyboardButton(text="/delete_image_rec_model")
+            KeyboardButton(text="➕ Добавить модель распознавания"),
+            KeyboardButton(text="❌ Удалить модель распознавания")
         ],
         [
-            KeyboardButton(text="/add_user"),
-            KeyboardButton(text="/remove_user")
+            KeyboardButton(text="👤 Добавить пользователя"),
+            KeyboardButton(text="🚫 Удалить пользователя")
         ],
         [
-            KeyboardButton(text="/send_to_all"),
-            KeyboardButton(text="/send_to_user")
+            KeyboardButton(text="📢 Отправить всем"),
+            KeyboardButton(text="📩 Отправить пользователю")
         ],
         [
             KeyboardButton(text="Главное меню")
@@ -54,7 +54,7 @@ async def get_main_keyboard(include_admin_button=False):
     ]
     
     if include_admin_button:
-        keyboard.append([KeyboardButton(text="Открыть админ-клавиатуру")])
+        keyboard.append([KeyboardButton(text="👑 Панель администратора")])
     
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 

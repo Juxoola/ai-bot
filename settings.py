@@ -265,7 +265,7 @@ async def process_image_generation_model_handler(callback_query, state):
     }
 
     if api == "g4f":
-        await update_image_gen_client(user_id, model_id)
+        await asyncio.to_thread(update_image_gen_client, user_id, model_id)
     
     await update_setting_and_refresh_keyboard(callback_query, state, user_context)
     

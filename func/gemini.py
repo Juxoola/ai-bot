@@ -1,6 +1,8 @@
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 from config import Form,  bot, DEFAULT_SYSTEM_PROMPTS
+
+
 from database import load_context,save_context
 import asyncio
 import base64
@@ -81,7 +83,6 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
             system_instruction = DEFAULT_SYSTEM_PROMPTS["default"]
         
         if system_instruction:
-            from google.genai import types as genai_types
             model = genai.GenerativeModel(
                 model_id,
                 system_instruction=system_instruction
@@ -186,7 +187,7 @@ async def handle_document_with_conversion(message: types.Message, state: FSMCont
                 tmp_file.write(file_data.read())
                 temp_file_path = tmp_file.name
                 
-            from func.g4f import process_local_file
+            from func.files import process_local_file
             
             file_content = await asyncio.to_thread(process_local_file, temp_file_path)
             
