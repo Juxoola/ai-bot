@@ -6,12 +6,9 @@ from keyboards import get_image_gen_model_selection_keyboard,get_image_recogniti
 from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import aiosqlite
+from func.decorators import admin_required
 
 async def cmd_add_user(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     await message.reply("Введите ID пользователя, которого нужно добавить:")
     await state.set_state(Form.waiting_for_add_user_id)
 
@@ -33,10 +30,6 @@ async def process_add_user_id(message: types.Message, state: FSMContext):
         await state.set_state(Form.waiting_for_message)
 
 async def cmd_remove_user(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     await message.reply("Введите ID пользователя, которого нужно удалить:")
     await state.set_state(Form.waiting_for_remove_user_id)
 
@@ -59,10 +52,6 @@ async def process_remove_user_id(message: types.Message, state: FSMContext):
 
 
 async def cmd_add_model(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     await message.reply("Введите имя новой модели для чата:")
     await state.set_state(Form.waiting_for_new_model_name)
 
@@ -113,17 +102,13 @@ async def process_new_model_api(message: types.Message, state: FSMContext):
 
 
 async def cmd_delete_model(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     AVAILABLE_MODELS = await av_models()
     keyboard = await get_api_selection_keyboard(AVAILABLE_MODELS)
 
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete")])
 
     msg = await message.reply("Выберите API для удаления модели:", reply_markup=keyboard)
-    await state.update_data(delete_model_message_id=msg.message_id) 
+    await state.update_data(delete_model_message_id=msg.message_id)
     await state.set_state(Form.waiting_for_delete_model_api_selection)
 
 
@@ -264,10 +249,6 @@ async def process_confirm_delete(callback_query: types.CallbackQuery, state: FSM
     await state.set_state(Form.waiting_for_message)
 
 async def cmd_add_image_rec_model(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     await message.reply("Введите ID новой модели для распознавания изображений:")
     await state.set_state(Form.waiting_for_new_image_rec_model_id)
 
@@ -313,10 +294,6 @@ async def process_new_image_rec_model_api(message: types.Message, state: FSMCont
     await state.set_state(Form.waiting_for_message)
 
 async def cmd_delete_image_rec_model(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     IMAGE_RECOGNITION_MODELS = await rec_models()
     keyboard, model_map = await get_image_recognition_model_selection_keyboard(IMAGE_RECOGNITION_MODELS)
     
@@ -325,7 +302,7 @@ async def cmd_delete_image_rec_model(message: types.Message, state: FSMContext):
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete_image_rec")])
 
     msg = await message.reply("Выберите модель для удаления:", reply_markup=keyboard)
-    await state.update_data(delete_image_rec_model_message_id=msg.message_id)  
+    await state.update_data(delete_image_rec_model_message_id=msg.message_id)
     await state.set_state(Form.waiting_for_delete_image_rec_model_name)
 
 async def process_delete_image_rec_model_name(callback_query: types.CallbackQuery, state: FSMContext):
@@ -406,10 +383,6 @@ async def process_confirm_delete_image_rec_model(
 
 
 async def cmd_add_image_gen_model(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     await message.reply("Введите ID модели для генерации изображений:")
     await state.set_state(Form.waiting_for_new_image_gen_model_id)
 
@@ -455,10 +428,6 @@ async def process_new_image_gen_model_api(message: types.Message, state: FSMCont
     await state.set_state(Form.waiting_for_message)
 
 async def cmd_delete_image_gen_model(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     IMAGE_GENERATION_MODELS = await gen_models()
     keyboard, model_map = await get_image_gen_model_selection_keyboard(IMAGE_GENERATION_MODELS)
     
@@ -467,7 +436,7 @@ async def cmd_delete_image_gen_model(message: types.Message, state: FSMContext):
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete_image_gen")])
 
     msg = await message.reply("Выберите модель для удаления:", reply_markup=keyboard)
-    await state.update_data(delete_image_gen_model_message_id=msg.message_id) 
+    await state.update_data(delete_image_gen_model_message_id=msg.message_id)
     await state.set_state(Form.waiting_for_delete_image_gen_model_name)
 
 async def process_delete_image_gen_model_name(callback_query: types.CallbackQuery, state: FSMContext):
@@ -537,10 +506,6 @@ async def process_confirm_delete_image_gen_model(
     await state.set_state(Form.waiting_for_message) 
 
 async def cmd_send_to_all(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     await message.reply("Введите сообщение, которое нужно отправить всем пользователям:")
     await state.set_state(Form.waiting_for_message_to_all)
 
@@ -575,10 +540,6 @@ async def process_message_to_all(message: types.Message, state: FSMContext):
     await state.set_state(Form.waiting_for_message)
 
 async def cmd_send_to_user(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.reply("Извините, у вас нет прав для выполнения этого действия.")
-        return
-
     await message.reply("Введите ID пользователя, которому нужно отправить сообщение:")
     await state.set_state(Form.waiting_for_user_id_to_send)
 

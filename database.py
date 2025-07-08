@@ -116,10 +116,10 @@ AVAILABLE_VOICES = [
 ]
 DEFAULT_VOICE = "alloy"
 
-user_context_cache = TTLCache(maxsize=2000, ttl=300)  # 5 минут
+user_context_cache = TTLCache(maxsize=5000, ttl=600)  # 10 минут
 
 class DatabaseConnectionPool:
-    def __init__(self, max_connections=20):
+    def __init__(self, max_connections=50):
         self.max_connections = max_connections
         self.pool = deque(maxlen=max_connections)
         self.lock = asyncio.Lock()
@@ -201,7 +201,7 @@ class DatabaseConnectionPool:
             self.connection_timeouts.clear()
             self.connection_stats["current_active"] = 0
 
-db_pool = DatabaseConnectionPool(max_connections=20)
+db_pool = DatabaseConnectionPool(max_connections=50)
 
 #семафор для ограничения одновременного доступа к базе данных
 db_semaphore = asyncio.Semaphore(20)
@@ -848,4 +848,3 @@ async def trim_context(messages, is_admin=False, max_messages=10):
         return messages
     
     return [messages[0]] + messages[-(max_messages-1):]
-

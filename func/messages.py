@@ -16,6 +16,7 @@ import queue
 import base64
 import aiofiles
 from pydub import AudioSegment
+from func.decorators import rate_limit
 
 DEFAULT_API_TIMEOUT = 60
 AUDIO_API_TIMEOUT = 120
@@ -199,30 +200,6 @@ async def convert_dashed_code_blocks_to_markdown(text):
 
             
 MAX_MESSAGE_LENGTH = 4050
-
-class RateLimiter:
-    def __init__(self, rate_limit=5, per_seconds=60):
-        self.rate_limit = rate_limit
-        self.per_seconds = per_seconds
-        self.user_requests = {}
-        self.lock = asyncio.Lock()
-    
-    async def can_process(self, user_id):
-        async with self.lock:
-            current_time = time.time()
-            if user_id not in self.user_requests:
-                self.user_requests[user_id] = []
-            
-            self.user_requests[user_id] = [
-                ts for ts in self.user_requests[user_id] 
-                if current_time - ts < self.per_seconds
-            ]
-            
-            if len(self.user_requests[user_id]) >= self.rate_limit:
-                return False
-                
-            self.user_requests[user_id].append(current_time)
-            return True
 
 async def process_message(message: types.Message, user_context, user_id, api_type, model_id, message_text, start_time=None, audio_data=None, audio_format=None, encoded_audio=None, is_long_message=False):
 
@@ -570,16 +547,9 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
         await message.reply(f"🚨Произошла ошибка: {e}")
         return None
 
+@rate_limit
 async def handle_all_messages(message: types.Message, state: FSMContext, audio_response=False):
     user_id = message.from_user.id
-        
-    if not is_admin(user_id):
-        rate_limiter = RateLimiter(rate_limit=5, per_seconds=60)
-        can_process = await rate_limiter.can_process(user_id)
-        if not can_process:
-            await message.reply("⚠️ Слишком много запросов. Пожалуйста, подождите")
-            return
-    
     start_time = time.time()
    
     user_context = await load_context(user_id)  
@@ -688,8 +658,10 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
                     temp_file_path = temp_file.name
 
                 try:
-                    with open(temp_file_path, "rb") as file_to_send:
-                        await message.reply_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
+                    import aiofiles
+                    async with aiofiles.open(temp_file_path, "rb") as file_to_send:
+                        file_bytes = await file_to_send.read()
+                        await message.reply_document(types.BufferedInputFile(file_bytes, filename="response.txt"))
                 except Exception as e:
                     logging.error(f"Ошибка при отправке файла: {e}")
                     await message.answer("🚨 Не удалось отправить ответ в виде файла.")
@@ -712,8 +684,10 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
                         temp_file_path = temp_file.name
 
                     try:
-                        with open(temp_file_path, "rb") as file_to_send:
-                            await message.reply_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
+                        import aiofiles
+                        async with aiofiles.open(temp_file_path, "rb") as file_to_send:
+                            file_bytes = await file_to_send.read()
+                            await message.reply_document(types.BufferedInputFile(file_bytes, filename="response.txt"))
                     except Exception as file_e:
                         logging.error(f"Ошибка при отправке файла: {file_e}")
                         await message.answer("🚨 Не удалось отправить ответ в виде файла.")
@@ -727,16 +701,9 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
 
     logging.info(f"Общее время обработки сообщения: {time.time() - start_time:.5f} секунд")
 
+@rate_limit
 async def cmd_long_message(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-
-    if not is_admin(user_id):
-        rate_limiter = RateLimiter(rate_limit=5, per_seconds=60)
-        can_process = await rate_limiter.can_process(user_id)
-        if not can_process:
-            await message.reply("⚠️ Слишком много запросов. Пожалуйста, подождите")
-            return
-        
     start_time = time.time()
 
     user_context = await load_context(user_id)
