@@ -3,20 +3,16 @@ from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 from config import Form, dp, DEFAULT_SYSTEM_PROMPTS
-from database import load_context, save_context, is_allowed, def_gen_model, def_rec_model, def_aspect, def_enhance, def_voice
+from database import load_context, save_context, def_gen_model, def_rec_model, def_aspect, def_enhance, def_voice
 from handlers.check import check_in_progress, set_in_progress, clear_in_progress
 from handlers.rate_limit import check_rate_limit
-
-otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
+from func.decorators import access_required
 
 @dp.message(F.text == "🗑️ Очистить")
 @dp.message(F.text == "Очистить")
 @dp.message(F.text == "/clear")
+@access_required
 async def cmd_clear_context(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-
     if not await check_rate_limit(message, "clear"):
         return
         

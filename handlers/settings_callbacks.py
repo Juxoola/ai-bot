@@ -4,7 +4,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 
 from config import Form, dp
-from database import is_allowed
 from settings import (
     cmd_settings, select_model_handler, select_image_gen_model_handler,
     select_aspect_ratio_handler,
@@ -14,16 +13,12 @@ from settings import (
     process_voice_selection_handler, role_selection_handler, api_selection_handler
 )
 from handlers.rate_limit import check_rate_limit, check_callback_rate_limit
-
-otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
+from func.decorators import access_required
 
 @dp.message(F.text == "⚙️ Настройки")
 @dp.message(F.text == "/settings")
+@access_required
 async def cmd_settings_handler(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     if not await check_rate_limit(message, "settings"):
         return
     

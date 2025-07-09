@@ -4,20 +4,16 @@ from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 
 from config import Form, dp
-from database import is_allowed, whisp_models
+from database import whisp_models
 from func.audio import handle_audio, process_whisper_model_selection
 from handlers.check import check_in_progress, set_in_progress, clear_in_progress
 from handlers.rate_limit import check_rate_limit, check_callback_rate_limit
-
-otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
+from func.decorators import access_required
 
 @dp.message(F.text == "🎤 Аудио")
 @dp.message(F.text == "/audio")
+@access_required
 async def cmd_audio(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     if not await check_rate_limit(message, "audio"):
         return
     

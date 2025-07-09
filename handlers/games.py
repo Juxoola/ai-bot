@@ -3,7 +3,6 @@ from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 from config import Form, dp
-from database import is_allowed
 from func.games import cmd_games
 from func.tictactoe import process_tictactoe_callback, TicTacToeGame, game_sessions as ttt_game_sessions, get_game_keyboard, COMPUTER
 from func.guess_number import process_guess_callback, GuessNumberGame, game_sessions as guess_game_sessions, get_input_keyboard
@@ -11,16 +10,12 @@ from handlers.check import check_in_progress, set_in_progress, clear_in_progress
 from handlers.rate_limit import check_rate_limit, check_callback_rate_limit
 import asyncio
 import logging
-
-otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
+from func.decorators import access_required
 
 @dp.message(F.text == "🎮 Игры")
 @dp.message(F.text == "/games")
+@access_required
 async def cmd_games_handler(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     # Проверяем rate limit
     if not await check_rate_limit(message, "games"):
         return

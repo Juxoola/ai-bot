@@ -2,21 +2,15 @@ from aiogram import types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 from config import Form, bot, dp
-from database import is_allowed
 from func.image_gen import process_image_generation_prompt, process_image_editing
 from handlers.check import check_in_progress, set_in_progress, clear_in_progress
 from handlers.rate_limit import check_rate_limit
-
-otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
+from func.decorators import access_required
 
 @dp.message(F.text == "🎨 Сгенерировать")
 @dp.message(F.text == "/generate_image")
+@access_required
 async def cmd_generate_image(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    if not is_allowed(user_id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     if not await check_rate_limit(message, "generate_image"):
         return
     
@@ -30,12 +24,8 @@ async def cmd_generate_image(message: types.Message, state: FSMContext):
 
 
 @dp.message(Form.waiting_for_image_generation_prompt, F.photo)
+@access_required
 async def process_image_edit_prompt_handler(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    if not is_allowed(user_id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     if not await check_rate_limit(message, "image_edit"):
         return
     
@@ -61,6 +51,7 @@ async def process_image_edit_prompt_handler(message: types.Message, state: FSMCo
 
 
 @dp.message(Form.waiting_for_image_generation_prompt)
+@access_required
 async def process_image_generation_prompt_handler(message: types.Message, state: FSMContext):
     if not await check_rate_limit(message, "image_generation"):
         return
@@ -81,12 +72,8 @@ async def process_image_generation_prompt_handler(message: types.Message, state:
 
 
 @dp.message(Form.waiting_for_image_edit_instructions)
+@access_required
 async def process_image_edit_instructions_handler(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    if not is_allowed(user_id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     if not await check_rate_limit(message, "image_edit_instructions"):
         return
     

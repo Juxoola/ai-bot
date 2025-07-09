@@ -3,7 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 
 from config import Form, dp, openai_clients, anthropic_clients, update_image_client_for_recognition
-from database import load_context, is_allowed, rec_models
+from database import load_context, rec_models
 from func.g4f import handle_image_recognition
 from func.files import handle_files_or_urls
 from func.gemini import handle_document_with_conversion, handle_image, process_custom_image_prompt
@@ -12,17 +12,13 @@ from func.anthropic_image import handle_image_anthropic, process_custom_image_pr
 from func.messages import handle_all_messages
 from handlers.check import check_in_progress, set_in_progress, clear_in_progress
 from handlers.rate_limit import check_rate_limit
-
-otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
+from func.decorators import access_required
 
 @dp.message()
+@access_required
 async def handle_all_messages_handler(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     
-    if not is_allowed(user_id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-
     if not await check_rate_limit(message, "message"):
         return
         

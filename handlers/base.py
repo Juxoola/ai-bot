@@ -6,22 +6,18 @@ from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 from config import Form, dp, bot,DEFAULT_SYSTEM_PROMPTS
-from database import load_context, save_context, is_admin, is_allowed, av_models, rec_models, def_gen_model, def_rec_model, def_aspect, def_enhance, def_voice
+from database import load_context, save_context, is_admin, av_models, rec_models, def_gen_model, def_rec_model, def_aspect, def_enhance, def_voice
 from keyboards import get_admin_keyboard, get_main_keyboard
 from handlers.check import clear_in_progress, exit_game
 from func.tictactoe import game_sessions as ttt_game_sessions
 from func.guess_number import game_sessions as guess_game_sessions
 from handlers.rate_limit import check_rate_limit
-
-otvet = "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)"
+from func.decorators import access_required
 
 @dp.message(Command("start"))
+@access_required
 async def cmd_start(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    
-    if not is_allowed(user_id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
     
     if not await check_rate_limit(message, "start"):
         return
@@ -50,11 +46,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "ℹ️ Помощь")
 @dp.message(F.text == "/help")
+@access_required
 async def cmd_help(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-      
     if not await check_rate_limit(message, "help"):
         return
 
@@ -123,11 +116,8 @@ async def cmd_help(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "⌨️ Вернуть клавиатуру")
 @dp.message(F.text == "/keyboard")
+@access_required
 async def cmd_restore_keyboard(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     if not await check_rate_limit(message, "keyboard"):
         return
     
@@ -162,11 +152,8 @@ async def fetch_random_meme():
 
 @dp.message(F.text == "🎭 Мем")
 @dp.message(F.text == "/meme")
+@access_required
 async def cmd_random_meme(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     if not await check_rate_limit(message, "meme"):
         return
     
@@ -192,11 +179,8 @@ async def cmd_random_meme(message: types.Message, state: FSMContext):
 
 
 @dp.message(F.text == "/cancel")
+@access_required
 async def cmd_cancel(message: types.Message, state: FSMContext):
-    if not is_allowed(message.from_user.id):
-        await message.reply(otvet, parse_mode=ParseMode.MARKDOWN)
-        return
-    
     if not await check_rate_limit(message, "cancel"):
         return
     
@@ -215,4 +199,4 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
     else:
         await clear_in_progress(state)
         await state.set_state(Form.waiting_for_message)
-        await message.reply("✅ Текущая операция отменена. Можете продолжать общение.") 
+        await message.reply("✅ Текущая операция отменена. Можете продолжать общение.")

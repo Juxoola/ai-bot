@@ -3,7 +3,8 @@ from aiogram.fsm.context import FSMContext
 from functools import wraps
 import asyncio
 import time
-from database import is_admin
+from database import is_admin, is_allowed
+from aiogram.enums import ParseMode
 
 def admin_required(func):
     """Декоратор для проверки прав администратора"""
@@ -17,6 +18,26 @@ def admin_required(func):
                 await message_or_callback.reply("Извините, у вас нет прав для выполнения этого действия.")
             elif isinstance(message_or_callback, types.CallbackQuery):
                 await message_or_callback.answer("Извините, у вас нет прав для выполнения этого действия.")
+            return
+        
+        return await func(message_or_callback, *args, **kwargs)
+    
+    return wrapper
+
+def access_required(func):
+    """Декоратор для проверки общего доступа к боту"""
+    @wraps(func)
+    async def wrapper(message_or_callback, *args, **kwargs):
+        user_id = message_or_callback.from_user.id
+        
+        if not is_allowed(user_id):
+            if isinstance(message_or_callback, types.Message):
+                await message_or_callback.reply(
+                    "У вас нет доступа к этому боту.\nВам [сюда](https://nahnah.ru/)",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            elif isinstance(message_or_callback, types.CallbackQuery):
+                await message_or_callback.answer("У вас нет доступа к этому боту")
             return
         
         return await func(message_or_callback, *args, **kwargs)
