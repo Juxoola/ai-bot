@@ -3,7 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram import Bot, Dispatcher
 import openai
 import anthropic
-import google.generativeai as genai
+from google import genai
 from g4f.client import Client
 from g4f.Provider import RetryProvider
 from groq import Groq
@@ -162,7 +162,8 @@ for provider, cfg in anthropic_providers_config.items():
         base_url=base_url
     )
 
-genai.configure(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 

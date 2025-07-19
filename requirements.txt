@@ -2,7 +2,6 @@ aiogram
 aiosqlite
 aiohttp
 google-genai
-google-generativeai
 deep_translator
 Pillow
 requests

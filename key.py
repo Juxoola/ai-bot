@@ -4,7 +4,6 @@ import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "default_bot_token")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "default_gemini_api_key")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "default_groq_api_key")
-CHUTES_API_TOKEN = os.environ.get("CHUTES_API_TOKEN", "default_chutes_api_token")
 
 # Allowed user IDs
 allowed_users_env = os.environ.get("ALLOWED_USER_IDS", "")

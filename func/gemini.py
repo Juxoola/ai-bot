@@ -1,21 +1,23 @@
 from aiogram import types
 from aiogram.fsm.context import FSMContext
-from config import Form,  bot, DEFAULT_SYSTEM_PROMPTS
+from config import Form,  bot, DEFAULT_SYSTEM_PROMPTS, gemini_client
 
-
+from PIL import Image
+import io
 from database import load_context,save_context
 import asyncio
 import base64
 import logging
 from aiogram.enums import ParseMode
-import google.generativeai as genai
+from google.genai import types as genai_types
 import tempfile
 import os
 
 async def handle_image(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    user_context = await load_context(user_id)
-
+    """
+    Просто получает изображение, кодирует его в base64 и сохраняет во временное
+    хранилище состояний (FSM), не затрагивая историю сообщений.
+    """
     photo = message.photo[-1]
     file_id = photo.file_id
 
@@ -28,22 +30,17 @@ async def handle_image(message: types.Message, state: FSMContext):
         lambda: base64.b64encode(image_data.read()).decode('utf-8')
     )
 
-    user_context["messages"].append({
-        "role": "user",
-        "parts": [
-            {"mime_type": "image/jpeg", "data": base64_image}
-        ]
-    })
-
-    await save_context(user_id, user_context)
     await state.update_data(image_data=base64_image)
     await message.reply("🔔Изображение получено. Теперь отправьте текстовый промпт.")
 
 
 async def process_custom_image_prompt(message: types.Message, state: FSMContext):
+    """
+    Обрабатывает первый запрос с изображением через stateless generate_content
+    и корректно сохраняет мультимодальный диалог в историю.
+    """
     user_id = message.from_user.id
     prompt = message.text
-
     data = await state.get_data()
     base64_image = data.get("image_data")
 
@@ -52,64 +49,54 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
         return
 
     user_context = await load_context(user_id)
-    model_key = user_context["model"]  
-    model_id, api_type = model_key.split('_')
+    model_id, _ = user_context["model"].split('_')
 
-    new_message = {
-        "role": "user",
-        "parts": [
-            {"text": prompt},
-            {"mime_type": "image/jpeg", "data": base64_image}
-        ]
-    }
-
-    user_context["messages"].append(new_message)
-
-    await save_context(user_id, user_context)
-    
     try:
+        image_bytes = base64.b64decode(base64_image)
+        pil_image = Image.open(io.BytesIO(image_bytes))
+
         system_instruction = None
-        messages_for_model = []
-        
         for msg in user_context["messages"]:
-            if msg["role"] == "system" and "parts" in msg and msg["parts"]:
-                system_text = msg["parts"][0].get("text", "")
-                if system_text:
-                    system_instruction = system_text
-            else:
-                messages_for_model.append(msg)
+            if msg.get("role") == "system":
+                system_instruction = msg["parts"][0]["text"]
+                break
         
         if not system_instruction:
-            system_instruction = DEFAULT_SYSTEM_PROMPTS["default"]
-        
-        if system_instruction:
-            model = genai.GenerativeModel(
-                model_id,
-                system_instruction=system_instruction
-            )
-        else:
-            model = genai.GenerativeModel(model_id)
-        
-        chat = model.start_chat(history=messages_for_model[:-1])
+            system_instruction = DEFAULT_SYSTEM_PROMPTS.get(user_context.get("system_role", "default"))
+
+        config = genai_types.GenerateContentConfig(
+            system_instruction=system_instruction
+        ) if system_instruction else None
+
+        user_context["messages"] = [{"role": "system", "parts": [{"text": system_instruction}]}]
+
         response = await asyncio.to_thread(
-            lambda: chat.send_message(messages_for_model[-1])
+            lambda: gemini_client.models.generate_content(
+                model=model_id,
+                contents=[pil_image, prompt], 
+                config=config,
+            )
         )
+        response_text = response.text
 
-        await message.reply(response.text, parse_mode=ParseMode.MARKDOWN)
-
-    except Exception as e:
-        logging.error(f"Ошибка Markdown при отправке сообщения: {e}")
-        await bot.send_message(user_id,
-            f"🚨Произошла ошибка при форматировании сообщения: {e}\n\n"
-            "Отправляю без форматирования."
-        )
-        await message.reply(response.text)
-
-        user_context["messages"].append({"role": "assistant", "content": response.text})
+        user_context["messages"].append({
+            "role": "user",
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": "image/jpeg", "data": base64_image}}
+            ]
+        })
+        user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
         await save_context(user_id, user_context)
 
-    await state.set_state(Form.waiting_for_message)
-    await state.update_data(image_data=None)
+        await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logging.error(f"Ошибка при обработке изображения/промпта: {e}", exc_info=True)
+        await message.reply(f"🚨Произошла ошибка: {e}")
+    finally:
+        await state.set_state(Form.waiting_for_message)
+        await state.update_data(image_data=None)
 
 async def handle_document_with_conversion(message: types.Message, state: FSMContext):
     user_id = message.from_user.id

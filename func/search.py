@@ -1,5 +1,5 @@
 from aiogram.fsm.context import FSMContext
-from config import get_client, Form, openai_clients, anthropic_clients, DEFAULT_SYSTEM_PROMPTS
+from config import get_client, Form, openai_clients, anthropic_clients, DEFAULT_SYSTEM_PROMPTS, gemini_client
 from func.messages import send_message_in_parts, call_anthropic_completion_sync
 from database import load_context, save_context
 from aiogram import types
@@ -13,7 +13,7 @@ from typing import Iterator
 import os
 from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import DuckDuckGoSearchException
-import google.generativeai as genai
+from google.genai import types as genai_types
 from .messages import call_openai_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT
 
 class SearchResults():
@@ -256,7 +256,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 response_text = response.choices[0].message.content
 
         elif api_type == "gemini":
-            async def gemini_request():
+            def gemini_request():
                 system_instruction = None
                 messages_for_model = []
                 
@@ -271,26 +271,25 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 if not system_instruction:
                     system_instruction = DEFAULT_SYSTEM_PROMPTS["default"]
                 
-                if system_instruction:
-                    gemini_model = genai.GenerativeModel(
-                        model_id,
-                        system_instruction=system_instruction
-                    )
-                else:
-                    gemini_model = genai.GenerativeModel(model_id)
-                
-                return gemini_model.generate_content(messages_for_model)
+                config = genai_types.GenerateContentConfig(
+                    system_instruction=system_instruction
+                ) if system_instruction else None
+
+                return gemini_client.models.generate_content(
+                    model=model_id,
+                    contents=messages_for_model,
+                    config=config,
+                )
 
             try:
                 response = await async_run_with_timeout(gemini_request, DEFAULT_API_TIMEOUT)
             except TimeoutError as e:
                 logging.error(f"Timeout in gemini_request (long message): {e}")
-                await message.reply("🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT}). Попробуйте еще раз или выберите другую модель.")
+                await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT}). Попробуйте еще раз или выберите другую модель.")
                 response = None
             
             if response:
                 response_text = response.text
-
         if response_text:
             if len(response_text) > MAX_MESSAGE_LENGTH:
                 await send_message_in_parts(message, response_text, MAX_MESSAGE_LENGTH)

@@ -1,6 +1,5 @@
-from config import bot, get_client,Form, openai_clients
+from config import bot, get_client,Form, openai_clients, gemini_client
 import config
-from key import GEMINI_API_KEY, CHUTES_API_TOKEN
 from aiogram.fsm.context import FSMContext
 from database import load_context,def_enhance, def_gen_model, def_aspect
 from aiogram import types
@@ -24,16 +23,9 @@ from deep_translator import GoogleTranslator
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
 google_ai_models = ["gemini-2.0-flash-preview-image-generation"]
-chutes_models = ["chroma", "hidream"]
 
-if GEMINI_API_KEY:
-    genai_client = genai.Client(api_key=GEMINI_API_KEY)
-else:
-    genai_client = None
-    logging.warning("GEMINI_API_KEY is not set. Google AI image generation will be unavailable.")
 
-if not CHUTES_API_TOKEN:
-    logging.warning("CHUTES_API_TOKEN is not set. Chutes AI image generation will be unavailable.")
+
 
 async def process_image_generation_prompt(message: types.Message, state: FSMContext):
     start_time = time.time()
@@ -201,7 +193,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 )
                 break 
 
-    elif api_type in openai_clients and api_type != "poli" and api_type != "chutes":
+    elif api_type in openai_clients and api_type != "poli":
         client = openai_clients.get(api_type)
         try:
             size_str = f"{width}x{height}"
@@ -262,10 +254,10 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             )
 
     elif api_type == "gemini":
-        if genai_client:
+        if gemini_client:
             try:
                 def generate_gemini_content():
-                    return genai_client.models.generate_content(
+                    return gemini_client.models.generate_content(
                         model=model_id,
                         contents=prompt,
                         config=genai_types.GenerateContentConfig(
@@ -387,111 +379,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 reply_to_message_id=original_message_id
             )
 
-    elif api_type == "chutes":
-        if not CHUTES_API_TOKEN:
-            await bot.send_message(
-                user_id, 
-                "🚨Генерация изображений через Chutes недоступна. API-ключ не настроен.",
-                reply_to_message_id=original_message_id
-            )
-            return
-            
-        try:
-            headers = {
-                "Authorization": f"Bearer {CHUTES_API_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            
-            if model_id == "chroma":
-                api_endpoint = "https://chutes-chroma.chutes.ai/generate"
-                payload = {
-                    "cfg": 4.5,
-                    "seed": random.randint(0, 1000000),
-                    "steps": 30,
-                    "width": width,
-                    "height": height,
-                    "prompt": prompt
-                }
-            elif model_id == "hidream":
-                api_endpoint = "https://chutes-hidream.chutes.ai/generate"
-                payload = {
-                    "seed": random.randint(0, 1000000),
-                    "prompt": prompt,
-                    "resolution": f"{width}x{height}",
-                    "guidance_scale": 5,
-                    "num_inference_steps": 50
-                }
-            else:
-                await bot.send_message(
-                    user_id, 
-                    f"🚨Неизвестная модель Chutes: {model_id}",
-                    reply_to_message_id=original_message_id
-                )
-                return
-                
-            async def generate_chutes_content():
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(api_endpoint, json=payload, headers=headers) as response:
-                        if response.status != 200:
-                            error_text = await response.text()
-                            raise Exception(f"API вернул ошибку: {response.status}, {error_text}")
-                        
-                        content_type = response.headers.get('Content-Type', '')
-                        if content_type.startswith('image/'):
-                            # API returns the image directly
-                            return await response.read()
-                        else:
-                            # Try to parse as JSON if not a direct image
-                            try:
-                                response_data = await response.json()
-                                if "image" in response_data:
-                                    import base64
-                                    return base64.b64decode(response_data["image"])
-                                else:
-                                    raise Exception("Изображение не найдено в ответе")
-                            except aiohttp.ContentTypeError:
-                                # If not JSON and not identified as image, return raw content
-                                return await response.read()
-            
-            image_data = await async_run_with_timeout(generate_chutes_content, DEFAULT_API_TIMEOUT * 2)
-            
-            if image_data is None:
-                await bot.send_message(
-                    user_id, 
-                    "🚨Превышено время ожидания при генерации изображения",
-                    reply_to_message_id=original_message_id
-                )
-                return
-                
-            caption = f"Фото сгенерировано Chutes моделью {model_id}"
-            if aspect_ratio:
-                caption += f" с соотношением сторон {aspect_ratio}"
-            if enhance:
-                caption += f", enhance: {enhance}"
-            caption += ":"
-            
-            await bot.send_photo(
-                user_id,
-                photo=types.BufferedInputFile(image_data, filename="image.jpg"),
-                caption=caption,
-                reply_to_message_id=original_message_id
-            )
-            
-            caption2 = "Фото без сжатия"
-            await bot.send_document(
-                user_id, 
-                document=types.BufferedInputFile(image_data, filename="image.jpg"), 
-                caption=caption2,
-                reply_to_message_id=original_message_id
-            )
-            
-        except Exception as e:
-            logging.error(f"Error during Chutes image generation: {e}")
-            await bot.send_message(
-                user_id, 
-                f"🚨Ошибка во время генерации изображения с помощью Chutes API: {e}",
-                reply_to_message_id=original_message_id
-            )
 
     end_time = time.time()
     processing_time = end_time - start_time
@@ -590,7 +477,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             contents = [instructions, *pil_images]
 
             def generate_gemini_content():
-                return genai_client.models.generate_content(
+                return gemini_client.models.generate_content(
                     model=model_id,
                     contents=contents,
                     config=genai_types.GenerateContentConfig(

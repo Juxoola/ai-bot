@@ -1,5 +1,5 @@
 from aiogram.fsm.context import FSMContext
-from config import Form, get_client, get_openai_client, openai_clients, should_bypass_timeout, bot, DEFAULT_SYSTEM_PROMPTS, anthropic_clients, get_anthropic_client
+from config import Form, get_client, get_openai_client, openai_clients, should_bypass_timeout, bot, DEFAULT_SYSTEM_PROMPTS, anthropic_clients, get_anthropic_client, gemini_client
 import tempfile
 import os
 from datetime import timedelta
@@ -9,7 +9,7 @@ import asyncio
 import logging
 from aiogram.enums import ParseMode
 import time
-import google.generativeai as genai
+from google.genai import types as genai_types
 import re
 import multiprocessing
 import queue
@@ -313,32 +313,45 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
         elif api_type == "gemini":
             def gemini_request():
                 system_instruction = None
-                messages_for_model = []
+                history_for_model = []
                 
                 for msg in user_context["messages"]:
                     if msg["role"] == "system" and "parts" in msg and msg["parts"]:
-                        system_text = msg["parts"][0].get("text", "")
-                        if system_text:
-                            system_instruction = system_text
+                        system_instruction = msg["parts"][0].get("text", "")
                     else:
-                        messages_for_model.append(msg)
+
+                        new_parts = []
+                        for part in msg.get('parts', []):
+                            if 'inline_data' in part and 'data' in part['inline_data']:
+                                try:
+                                    img_bytes = base64.b64decode(part['inline_data']['data'])
+                                    new_parts.append(Image.open(io.BytesIO(img_bytes)))
+                                except Exception:
+                                    new_parts.append(part)
+                            else:
+                                new_parts.append(part)
+                        msg['parts'] = new_parts
+                        history_for_model.append(msg)
                 
                 if not system_instruction:
                     system_instruction = DEFAULT_SYSTEM_PROMPTS["default"]
+
+                current_prompt = message_text if is_long_message else message.text
+                history_for_model.append({'role': 'user', 'parts': [{'text': current_prompt}]})
+
+                config = genai_types.GenerateContentConfig(
+                    system_instruction=system_instruction
+                ) if system_instruction else None
                 
-                if system_instruction:
-                    gemini_model = genai.GenerativeModel(
-                        model_id,
-                        system_instruction=system_instruction
-                    )
-                else:
-                    gemini_model = genai.GenerativeModel(model_id)
+                response = gemini_client.models.generate_content(
+                    model=model_id,
+                    contents=history_for_model,
+                    config=config
+                )
                 
-                if not messages_for_model:
-                    messages_for_model = [
-                        {"role": "user", "parts": [{"text": message_text if is_long_message else message.text}]}
-                    ]
-                return gemini_model.generate_content(messages_for_model)
+                user_context["messages"].append({'role': 'user', 'parts': [{'text': current_prompt}]})
+
+                return response
 
             current_time = time.strftime("%H:%M:%S", time.localtime())
             logging.info(f"[{current_time}] Начало запроса к Gemini API{' (длинное сообщение)' if is_long_message else ''}")
