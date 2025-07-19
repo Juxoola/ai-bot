@@ -15,7 +15,7 @@ from google.genai import types as genai_types
 from datetime import timedelta
 import time
 from PIL import Image
-from .messages import DEFAULT_API_TIMEOUT
+from .messages import DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
 import requests
 from deep_translator import GoogleTranslator
 
@@ -380,17 +380,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             )
 
 
-    end_time = time.time()
-    processing_time = end_time - start_time
-    formatted_processing_time = str(timedelta(seconds=int(processing_time)))
-    service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
-
-    if user_context.get("show_processing_time", True):
-        await bot.send_message(
-            user_id, 
-            service_info,
-            reply_to_message_id=original_message_id
-        )
+    await calculate_and_show_processing_time(message, user_context, start_time)
 
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_generation_prompt=None)
@@ -564,16 +554,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             reply_to_message_id=original_message_id
         )
     
-    end_time = time.time()
-    processing_time = end_time - start_time
-    formatted_processing_time = str(timedelta(seconds=int(processing_time)))
-    
-    if user_context.get("show_processing_time", True):
-        await bot.send_message(
-            user_id, 
-            f"⏳ Время обработки запроса: {formatted_processing_time}",
-            reply_to_message_id=original_message_id
-        )
+    await calculate_and_show_processing_time(message, user_context, start_time)
     
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_edit_data=None)

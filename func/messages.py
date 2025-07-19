@@ -201,10 +201,25 @@ async def convert_dashed_code_blocks_to_markdown(text):
             
 MAX_MESSAGE_LENGTH = 4050
 
+async def calculate_and_show_processing_time(message, user_context, start_time):
+    """Вычисляет время обработки запроса и показывает его пользователю, если включена соответствующая опция."""
+    end_time = time.time()
+    processing_time = end_time - start_time
+    formatted_processing_time = str(timedelta(seconds=int(processing_time)))
+    
+    service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
+    
+    if user_context.get("show_processing_time", True):
+        await message.answer(service_info)
+    
+    logging.info(f"Общее время обработки сообщения: {processing_time:.5f} секунд")
+    
+    return formatted_processing_time
+
 async def process_message(message: types.Message, user_context, user_id, api_type, model_id, message_text, start_time=None, audio_data=None, audio_format=None, encoded_audio=None, is_long_message=False):
 
     if start_time is None:
-     start_time = time.time()
+        start_time = time.time()
     
     response_text = ""
     response_audio = None
@@ -659,11 +674,6 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
     )
     
     if response_text:
-            end_time = time.time()
-            processing_time = end_time - start_time
-            formatted_processing_time = str(timedelta(seconds=int(processing_time)))
-
-            service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
             if len(response_text) > MAX_MESSAGE_LENGTH:
                 await send_message_in_parts(message, response_text, MAX_MESSAGE_LENGTH)
                 with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".txt") as temp_file:
@@ -708,11 +718,8 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
                         os.remove(temp_file_path)
 
             await save_context(user_id, user_context)
-
-            if user_context.get("show_processing_time", True):
-                await message.answer(service_info)
-
-    logging.info(f"Общее время обработки сообщения: {time.time() - start_time:.5f} секунд")
+            
+            await calculate_and_show_processing_time(message, user_context, start_time)
 
 @rate_limit
 async def cmd_long_message(message: types.Message, state: FSMContext):
@@ -746,11 +753,6 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
             )
 
             if response_text:
-                end_time = time.time()
-                processing_time = end_time - start_time
-                formatted_processing_time = str(timedelta(seconds=int(processing_time)))
-
-                service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
                 
                 if len(response_text) > MAX_MESSAGE_LENGTH:
                     await send_message_in_parts(message, response_text, MAX_MESSAGE_LENGTH)
@@ -800,9 +802,8 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
                         {"role": "model", "parts": [{"text": response_text}]}
                     )
                 await save_context(user_id, user_context)
-
-                if user_context.get("show_processing_time", True):
-                    await message.answer(service_info)
+                
+                await calculate_and_show_processing_time(message, user_context, start_time)
 
             await message.reply("🔔Длинное сообщение обработано.")
             await state.set_state(Form.waiting_for_message)

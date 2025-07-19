@@ -4,7 +4,7 @@ from aiogram import types
 from aiogram.fsm.context import FSMContext
 from config import Form, get_anthropic_client, bot
 from database import load_context, save_context
-from .messages import call_anthropic_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT
+from .messages import call_anthropic_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
 import time
 from datetime import timedelta
 
@@ -82,13 +82,7 @@ async def process_image_with_anthropic(message: types.Message, state: FSMContext
 
         await message.reply(response_text)
 
-        end_time = time.time()
-        processing_time = end_time - start_time
-        formatted_processing_time = str(timedelta(seconds=int(processing_time)))
-        service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
-
-        if user_context.get("show_processing_time", True):
-            await bot.send_message(user_id, service_info)
+        await calculate_and_show_processing_time(message, user_context, start_time)
 
     except Exception as e:
         logging.error(f"Error during Anthropic image processing: {e}")
@@ -119,4 +113,4 @@ async def handle_image_anthropic(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(image_data=img_b64_str, img_type=img_type)
-    await message.reply("🔔Теперь введите текстовый промпт к изображению.") 
+    await message.reply("🔔Теперь введите текстовый промпт к изображению.")
