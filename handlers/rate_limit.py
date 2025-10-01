@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 rate_limit_data = {}
 
 # Максимальное количество запросов в минуту
-MAX_REQUESTS_PER_MINUTE = 5
+MAX_REQUESTS_PER_MINUTE = 10
 
 async def check_rate_limit(message: types.Message, action_type: str) -> bool:
 

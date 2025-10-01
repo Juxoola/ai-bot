@@ -202,7 +202,6 @@ async def convert_dashed_code_blocks_to_markdown(text):
 MAX_MESSAGE_LENGTH = 4050
 
 async def calculate_and_show_processing_time(message, user_context, start_time):
-    """Вычисляет время обработки запроса и показывает его пользователю, если включена соответствующая опция."""
     end_time = time.time()
     processing_time = end_time - start_time
     formatted_processing_time = str(timedelta(seconds=int(processing_time)))
