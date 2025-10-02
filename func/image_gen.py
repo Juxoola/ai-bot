@@ -149,7 +149,8 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     "seed": random.randint(0, 1000000),
                     "nologo": "true",
                     "private": "true",
-                    "safe": "false"
+                    "safe": "false",
+                    "token": "I8ez0Tiphl9ksnCT"
                 }
                 response = requests.get(url, params=params)
                 response.raise_for_status()

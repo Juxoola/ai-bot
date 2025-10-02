@@ -11,6 +11,7 @@ from config import openai_clients, DEFAULT_SYSTEM_PROMPTS
 import time
 from cachetools import TTLCache
 import logging
+import aiohttp
 
 AVAILABLE_MODELS = None
 IMAGE_GENERATION_MODELS = None
@@ -400,6 +401,7 @@ async def initialize_database():
         IMAGE_RECOGNITION_MODELS = loaded_image_rec_models
         WHISPER_MODELS = loaded_whisper_models
 
+        await update_models_from_pollinations()
         await initialize_models()
         await db.execute("CREATE INDEX IF NOT EXISTS idx_user_contexts_user_id ON user_contexts (user_id)")
 
@@ -716,6 +718,69 @@ async def initialize_models():
     IMAGE_RECOGNITION_MODELS = await load_image_recognition_models()
     WHISPER_MODELS = await load_whisper_models()
 
+async def update_models_from_pollinations():
+    async with get_db_connection() as db:
+        try:
+            # Удаление старых моделей 'polil'
+            await db.execute("DELETE FROM models WHERE api = 'poli'")
+            await db.execute("DELETE FROM image_recognition_models WHERE api = 'poli'")
+
+            # Получение новых моделей
+            url = "https://text.pollinations.ai/models"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        models_data = await response.json()
+                        
+                        new_models = []
+                        new_image_recognition_models = []
+                        
+                        for model_info in models_data:
+                            tier = model_info.get("tier")
+                            if tier in ["seed", "anonymous"]:
+                                model_id = model_info.get("name")
+                                if not model_id:
+                                    continue
+                                model_name = model_info.get("description", model_id)
+                                api = "poli"
+                                
+                                if model_info.get("vision"):
+                                    new_image_recognition_models.append({
+                                        "model_id": model_id,
+                                        "api": api
+                                    })
+                                    new_models.append({
+                                        "model_id": model_id,
+                                        "model_name": model_name,
+                                        "api": api
+                                    })
+                                else:
+                                    new_models.append({
+                                        "model_id": model_id,
+                                        "model_name": model_name,
+                                        "api": api
+                                    })
+                        
+                        # Вставка новых моделей
+                        if new_models:
+                            await db.executemany(
+                                "INSERT INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
+                                [(m["model_id"], m["model_name"], m["api"]) for m in new_models]
+                            )
+                        
+                        if new_image_recognition_models:
+                            await db.executemany(
+                                "INSERT INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                                [(m["model_id"], m["api"]) for m in new_image_recognition_models]
+                            )
+                            
+                        await db.commit()
+                        logging.info("Модели от Pollinations успешно обновлены.")
+                    else:
+                        logging.error(f"Ошибка при получении моделей от Pollinations: HTTP {response.status}")
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении моделей от Pollinations: {e}")
+            await db.rollback()
 
 def is_allowed(user_id):
     return user_id in ALLOWED_USER_IDS
