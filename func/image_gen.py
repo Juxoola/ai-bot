@@ -8,7 +8,7 @@ import logging
 from io import BytesIO
 from func.messages import async_run_with_timeout
 import aiohttp
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 import random
 from google import genai
 from google.genai import types as genai_types
@@ -23,7 +23,7 @@ from deep_translator import GoogleTranslator
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
 google_ai_models = ["gemini-2.0-flash-preview-image-generation"]
-
+pollinations_edit_models = ["nanobanana", "seedream"]
 
 
 
@@ -124,8 +124,8 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         try:
             improved_prompt = await asyncio.to_thread(
                 lambda:
-                    config.enhance_prompt_client.chat.completions.create(
-                        model=config.model_name_e,
+                    config.openai_clients["poli"].chat.completions.create(
+                        model="openai-fast",
                         messages=[
                             {"role": "user", "content": f"You are a text prompt generator for creating images. I will give you a post topic, and you will generate one best-quality prompt and show it to me.\n\n{prompt}\n\nDo not ask for clarifications—just generate the best prompt using your creativity, and I will request changes if needed.\n\n### Prompt Structure:\n- Camera angle → Scene description → Character description → Camera settings\n- Character descriptions must always be separated by commas.\n- All parts of the structure must be separated by commas.\n\n### Notes:\n- At the end of the prompt, you may also include the camera type (if it's not a painting style), such as DSLR, Nikon D, Canon EOS R3, etc.\n- You can specify a lens type (e.g., 14mm focal length, 35mm, fisheye, wide-angle, etc.) if necessary.\n\n### Example Formatting:\n- Highly detailed watercolor painting, majestic lion, intricate fur detail, photograph, natural lighting, brush strokes, watercolor splatters\n- Portrait photo of a red-haired girl standing in water covered with lily pads, long braided hair, Canon EOS R3, volumetric lighting\n- Wide-angle, stunning sunset over a wide open beach, vibrant pink-orange and gold sky, water reflecting sunset colors, mesmerizing effect, lone tall tree in foreground, tree silhouetted against sunset, dramatic feel, Canon EOS R3, landscape scene\n- Watercolor painting, family of elephants roaming the savanna, delicate brush strokes, soft colors, Canon EOS R3, wide-angle lens\n\n### IMPORTANT:\nGenerate the best possible prompt immediately in English, and show only the prompt. Do not write anything else."}
                         ],
@@ -399,15 +399,12 @@ async def process_image_editing(message: types.Message, state: FSMContext):
     image_data = data.get("image_edit_data")
     instructions = data.get("image_edit_instructions")
     
-    # Store the original message ID to reply to it later
     original_message_id = message.message_id
     
     if not image_data or not instructions:
         await message.reply("🚨 Не удалось получить данные изображения или инструкции по редактированию")
         await state.set_state(Form.waiting_for_message)
         return
-    
-    
 
     user_context = await load_context(user_id)
     model_info = user_context.get("image_generation_model")
@@ -422,9 +419,128 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             api_type = model_info[last_underscore_pos+1:]
         else:
             model_id = model_info
-            api_type = "poli" 
-    
-    if api_type == "gemini" and model_id in google_ai_models:
+            api_type = "poli"
+
+    if api_type == "poli" and model_id in pollinations_edit_models:
+        try:
+            # --- Функция upload_to_catbox определена внутри, как вы просили ---
+            def upload_to_catbox(image_bytes: bytes) -> str:
+                """
+                Загружает изображение на хостинг catbox.moe и возвращает прямую ссылку.
+                """
+                try:
+                    url = "https://catbox.moe/user/api.php"
+                    payload = {'reqtype': 'fileupload'}
+                    files = {'fileToUpload': ('image.jpg', image_bytes, 'image/jpeg')}
+                    
+                    response = requests.post(url, data=payload, files=files, timeout=15)
+                    
+                    if response.status_code == 200:
+                        image_url = response.text.strip()
+                        if image_url.startswith('http'):
+                            logging.info(f"Изображение успешно загружено на Catbox: {image_url}")
+                            return image_url
+                        else:
+                            raise Exception(f"Не удалось получить корректный URL от Catbox.moe. Ответ: {image_url}")
+                    else:
+                        raise Exception(f"Ошибка загрузки на хостинг Catbox.moe: {response.status_code}, {response.text}")
+
+                except requests.exceptions.RequestException as e:
+                    logging.error(f"Сетевая ошибка при загрузке на Catbox.moe: {e}")
+                    raise Exception(f"Сетевая ошибка при загрузке на Catbox.moe: {e}")
+                except Exception as e:
+                    logging.error(f"Произошла ошибка в функции upload_to_catbox: {e}")
+                    raise e
+            
+            # --------------------------------------------------------------------
+
+            if isinstance(image_data, list):
+                image_data = image_data[0]
+
+            if hasattr(image_data, 'read'):
+                image_bytes = image_data.read()
+            else:
+                image_bytes = image_data
+
+            # Вызов вложенной функции через отдельный поток
+            image_url = await asyncio.to_thread(upload_to_catbox, image_bytes)
+
+            # Получаем размеры изображения
+            with Image.open(BytesIO(image_bytes)) as img:
+                width, height = img.size
+                if width * height < 921600:
+                    logging.info(f"Image is too small ({width}x{height}={width*height} pixels). Resizing...")
+                    aspect_ratio = width / height
+                    # Ensure total pixels are slightly above the minimum requirement
+                    scale_factor = (921600 / (width * height)) ** 0.5 * 1.01
+                    new_width = int(width * scale_factor)
+                    new_height = int(height * scale_factor)
+
+                    img = img.resize((new_width, new_height), Image.LANCZOS)
+                    logging.info(f"Image resized to {new_width}x{new_height}={new_width*new_height} pixels.")
+                    
+                    # Сохраняем измененное изображение в байты
+                    buffer = BytesIO()
+                    img.save(buffer, format="JPEG")
+                    image_bytes = buffer.getvalue()
+                    width, height = new_width, new_height
+
+
+            encoded_prompt = quote(instructions)
+            base_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+            params = {
+                "model": model_id,
+                "image": image_url,
+                "width": width,
+                "height": height,
+                "nologo": "true",
+                "private": "true",
+                "safe": "false",
+                "token": "I8ez0Tiphl9ksnCT"
+            }
+            
+            # Используем импортированную в начале файла функцию urlencode
+            query_string = urlencode(params)
+            full_url = f"{base_url}?{query_string}"
+            logging.info(f"Запрос к Pollinations: {full_url}")
+
+            def fetch_image():
+                try:
+                    response = requests.get(full_url, timeout=DEFAULT_API_TIMEOUT, stream=True)
+                    response.raise_for_status()
+                    content = b''
+                    for chunk in response.iter_content(chunk_size=8192):
+                        content += chunk
+                    return content
+                except Exception as e:
+                    logging.error(f"Error during pollinations image editing: {e}")
+                    raise e
+
+            edited_image_data = await async_run_with_timeout(fetch_image, DEFAULT_API_TIMEOUT)
+
+            if not edited_image_data:
+                raise Exception("Не удалось получить отредактированное изображение от Pollinations.")
+
+            caption = f"✏️ Изображение отредактировано с помощью {model_id}"
+            
+            await bot.send_photo(
+                user_id,
+                photo=types.BufferedInputFile(edited_image_data, filename="edited_image.jpg"),
+                caption=caption,
+                reply_to_message_id=original_message_id
+            )
+            await bot.send_document(
+                user_id,
+                document=types.BufferedInputFile(edited_image_data, filename="edited_image.jpg"),
+                caption="Отредактированное изображение без сжатия",
+                reply_to_message_id=original_message_id
+            )
+
+        except Exception as e:
+            logging.error(f"Error during Pollinations image editing: {e}")
+            await bot.send_message(user_id, f"🚨 Ошибка при редактировании изображения: {e}", reply_to_message_id=original_message_id)
+
+    elif api_type == "gemini" and model_id in google_ai_models:
         try:
             if isinstance(image_data, list):
                 pil_images = []
@@ -453,14 +569,14 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                     original_prompt = instructions
                     instructions = translated_prompt
                     await bot.send_message(
-                        user_id, 
+                        user_id,
                         f"🔔 Ваш запрос был переведен на английский для лучших результатов:\n'{original_prompt}' → '{instructions}'",
                         reply_to_message_id=original_message_id
                     )
             except Exception as e:
                 logging.error(f"Error during prompt translation: {e}")
                 await bot.send_message(
-                    user_id, 
+                    user_id,
                     f"⚠️ Не удалось перевести запрос на английский: {e}",
                     reply_to_message_id=original_message_id
                 )
@@ -480,7 +596,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             
             if response is None:
                 await bot.send_message(
-                    user_id, 
+                    user_id,
                     "🚨 Превышено время ожидания при редактировании изображения. Пожалуйста, попробуйте еще раз.",
                     reply_to_message_id=original_message_id
                 )
@@ -496,7 +612,6 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                         text_response += part.text
                     
                     elif hasattr(part, 'inline_data') and part.inline_data and part.inline_data.mime_type.startswith('image/'):
-                        # Convert image data to bytes
                         image = await asyncio.to_thread(
                             lambda: Image.open(BytesIO(part.inline_data.data))
                         )
@@ -511,7 +626,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 if text_response:
                     error_message += "\n\nОтвет модели: " + text_response[:3000]
                 await bot.send_message(
-                    user_id, 
+                    user_id,
                     error_message,
                     reply_to_message_id=original_message_id
                 )
@@ -528,14 +643,14 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             
             if text_response:
                 await bot.send_message(
-                    user_id, 
+                    user_id,
                     text_response,
                     reply_to_message_id=original_message_id
                 )
             
             await bot.send_document(
-                user_id, 
-                document=types.BufferedInputFile(edited_image_data, filename="edited_image.jpg"), 
+                user_id,
+                document=types.BufferedInputFile(edited_image_data, filename="edited_image.jpg"),
                 caption="Отредактированное изображение без сжатия",
                 reply_to_message_id=original_message_id
             )
@@ -544,14 +659,14 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             logging.error(f"Error during image editing: {e}")
             error_message = f"🚨 Ошибка при редактировании изображения: {str(e)[:200]}"
             await bot.send_message(
-                user_id, 
+                user_id,
                 error_message,
                 reply_to_message_id=original_message_id
             )
     else:
         await bot.send_message(
-            user_id, 
-            "🚨 Редактирование изображений поддерживается только моделями Google AI. Пожалуйста, измените модель в настройках.",
+            user_id,
+            "🚨 Редактирование изображений поддерживается только моделями Google AI и Pollinations (nanobanana, seedream). Пожалуйста, измените модель в настройках.",
             reply_to_message_id=original_message_id
         )
     

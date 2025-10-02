@@ -173,12 +173,12 @@ async def process_delete_model_api_selection(callback_query: types.CallbackQuery
             logging.error(f"Ошибка при удалении сообщения: {e}")
     
     AVAILABLE_MODELS = await av_models()
-    keyboard = await get_models_by_api_keyboard(AVAILABLE_MODELS, selected_api)
+    keyboard, model_map = await get_models_by_api_keyboard(AVAILABLE_MODELS, selected_api)
     
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete")])
     
     msg = await bot.send_message(callback_query.from_user.id, f"Выберите модель API {selected_api} для удаления:", reply_markup=keyboard)
-    await state.update_data(delete_model_message_id=msg.message_id) 
+    await state.update_data(delete_model_message_id=msg.message_id, model_map=model_map)
     await state.set_state(Form.waiting_for_delete_model_by_api)
 
 async def process_delete_model_by_api(callback_query: types.CallbackQuery, state: FSMContext):
@@ -188,9 +188,19 @@ async def process_delete_model_by_api(callback_query: types.CallbackQuery, state
         await state.set_state(Form.waiting_for_message)
         return
     
-    model_data = callback_query.data.split('_', 1)[1] if callback_query.data.startswith('model_') else callback_query.data
+    short_id = callback_query.data.split('_', 1)[1] if callback_query.data.startswith('model_') else callback_query.data
     
     data = await state.get_data()
+    model_map = data.get("model_map", {})
+    
+    if short_id not in model_map:
+        await bot.answer_callback_query(callback_query.id)
+        await bot.send_message(callback_query.from_user.id, "Модель не найдена (invalid short_id).")
+        await state.set_state(Form.waiting_for_message)
+        return
+        
+    model_data = model_map[short_id]
+
     delete_model_message_id = data.get("delete_model_message_id")
     if delete_model_message_id:
         try:

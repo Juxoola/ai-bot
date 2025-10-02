@@ -151,6 +151,9 @@ async def get_models_by_api_keyboard(available_models, selected_api):
         [InlineKeyboardButton(text=f"----- Модели {selected_api.upper()} -----", callback_data="ignore")]
     )
     
+    model_map = {}
+    counter = 1
+    
     api_models = []
     for model_id, model_data in available_models.items():
         if model_data["api"] == selected_api:
@@ -160,7 +163,11 @@ async def get_models_by_api_keyboard(available_models, selected_api):
     
     buttons_row = []
     for model_id, model_name in api_models:
-        button = InlineKeyboardButton(text=model_name, callback_data=f"model_{model_id}")
+        short_id = f"m{counter}"
+        model_map[short_id] = model_id
+        counter += 1
+        
+        button = InlineKeyboardButton(text=model_name, callback_data=f"model_{short_id}")
         buttons_row.append(button)
         if len(buttons_row) == 2:
             keyboard.inline_keyboard.append(buttons_row)
@@ -169,7 +176,7 @@ async def get_models_by_api_keyboard(available_models, selected_api):
     if buttons_row:
         keyboard.inline_keyboard.append(buttons_row)
     
-    return keyboard
+    return keyboard, model_map
 
 async def get_image_gen_model_selection_keyboard(IMAGE_GENERATION_MODELS):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])

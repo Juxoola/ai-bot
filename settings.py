@@ -67,7 +67,8 @@ async def api_selection_handler(callback_query: types.CallbackQuery, state: FSMC
     api_type = callback_query.data.split("api_")[1]
     await state.update_data(selected_api=api_type)
     
-    keyboard = await get_models_by_api_keyboard(AVAILABLE_MODELS, api_type)
+    keyboard, model_map = await get_models_by_api_keyboard(AVAILABLE_MODELS, api_type)
+    await state.update_data(model_map=model_map)
 
     await bot.edit_message_text(
         f"Выберите модель {api_type.upper()} для чата:",
@@ -198,7 +199,14 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
     user_id = callback_query.from_user.id
     data = await state.get_data()
     
-    model_key = callback_query.data.split("model_")[1] 
+    short_id = callback_query.data.split("model_")[1]
+    model_map = data.get("model_map", {})
+    
+    if short_id not in model_map:
+        await bot.answer_callback_query(callback_query.id, text="Модель не найдена")
+        return
+        
+    model_key = model_map[short_id]
     
     user_context = await load_context(user_id)
     AVAILABLE_MODELS = await av_models()

@@ -317,18 +317,13 @@ def get_client(user_id, client_type="g4f_client", model_name=None):
 
 
 enhance_prompt_client = None
-model_name_e = "gpt-4o"  
+model_name_e = "openai-fast"
 
 async def init_enhance_prompt_client():
     
     global enhance_prompt_client
-    enhanced_chat_providers = get_supported_providers(chat_providers, model_name_e)
-    logging.info(f"Providers {enhanced_chat_providers}")
-    enhanced_image_providers = get_supported_providers(image_providers, model_name_e)
-    enhance_prompt_client = Client(
-        provider=RetryProvider(enhanced_chat_providers, shuffle=False),
-        image_provider=RetryProvider(enhanced_image_providers, shuffle=False)
-    )
+    
+    enhance_prompt_client = openai_clients["poli"]
     logging.info(f"Enhance prompt client initialized with model {model_name_e}")
 
 

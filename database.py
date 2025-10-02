@@ -7,7 +7,7 @@ import asyncio
 from collections import deque
 from contextlib import asynccontextmanager
 import os
-from config import openai_clients, DEFAULT_SYSTEM_PROMPTS
+from config import openai_clients, DEFAULT_SYSTEM_PROMPTS, providers_config
 import time
 from cachetools import TTLCache
 import logging
@@ -400,8 +400,12 @@ async def initialize_database():
         IMAGE_GENERATION_MODELS = loaded_image_gen_models
         IMAGE_RECOGNITION_MODELS = loaded_image_rec_models
         WHISPER_MODELS = loaded_whisper_models
-
+ 
         await update_models_from_pollinations()
+        await update_models_from_openrouter()
+        await update_models_from_ddc()
+        await update_models_from_github()
+        await update_models_from_electronhub()
         await initialize_models()
         await db.execute("CREATE INDEX IF NOT EXISTS idx_user_contexts_user_id ON user_contexts (user_id)")
 
@@ -780,6 +784,237 @@ async def update_models_from_pollinations():
                         logging.error(f"Ошибка при получении моделей от Pollinations: HTTP {response.status}")
         except Exception as e:
             logging.error(f"Ошибка при обновлении моделей от Pollinations: {e}")
+            await db.rollback()
+
+async def update_models_from_openrouter():
+    async with get_db_connection() as db:
+        try:
+            await db.execute("DELETE FROM models WHERE api = 'openrouter'")
+            await db.execute("DELETE FROM image_recognition_models WHERE api = 'openrouter'")
+
+            url = "https://openrouter.ai/api/v1/models"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        models_data = await response.json()
+                        
+                        new_models = []
+                        new_image_recognition_models = []
+                        
+                        for model_info in models_data.get("data", []):
+                            model_id = model_info.get("id")
+                            if model_id and "free" in model_id:
+                                model_name = model_info.get("name")
+                                api = "openrouter"
+                                
+                                new_models.append({
+                                    "model_id": model_id,
+                                    "model_name": model_name,
+                                    "api": api
+                                })
+
+                                if "image" in model_info.get("architecture", {}).get("input_modalities", []):
+                                    new_image_recognition_models.append({
+                                        "model_id": model_id,
+                                        "api": api
+                                    })
+
+                        if new_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
+                                [(m["model_id"], m["model_name"], m["api"]) for m in new_models]
+                            )
+                        
+                        if new_image_recognition_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                                [(m["model_id"], m["api"]) for m in new_image_recognition_models]
+                            )
+                            
+                        await db.commit()
+                        logging.info("Модели от OpenRouter успешно обновлены.")
+                    else:
+                        logging.error(f"Ошибка при получении моделей от OpenRouter: HTTP {response.status}")
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении моделей от OpenRouter: {e}")
+            await db.rollback()
+
+async def update_models_from_ddc():
+    async with get_db_connection() as db:
+        try:
+            await db.execute("DELETE FROM models WHERE api = 'ddc'")
+            await db.execute("DELETE FROM image_recognition_models WHERE api = 'ddc'")
+
+            urls = ["https://api.a4f.co/v1/models"]
+            
+            new_models = []
+            new_image_recognition_models = []
+
+            async with aiohttp.ClientSession() as session:
+                for url in urls:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            models_data = await response.json()
+                            
+                            for model_info in models_data.get("data", []):
+                                if model_info.get("type") == "chat/completion":
+                                    model_id = model_info.get("id")
+                                    if not model_id:
+                                        continue
+                                    
+                                    model_name = model_id
+                                    api = "ddc"
+                                    
+                                    new_models.append({
+                                        "model_id": model_id,
+                                        "model_name": model_name,
+                                        "api": api
+                                    })
+
+                                    if "vision" in model_info.get("features", []):
+                                        new_image_recognition_models.append({
+                                            "model_id": model_id,
+                                            "api": api
+                                        })
+                        else:
+                            logging.error(f"Ошибка при получении моделей от {url}: HTTP {response.status}")
+
+            if new_models:
+                await db.executemany(
+                    "INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
+                    [(m["model_id"], m["model_name"], m["api"]) for m in new_models]
+                )
+            
+            if new_image_recognition_models:
+                await db.executemany(
+                    "INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                    [(m["model_id"], m["api"]) for m in new_image_recognition_models]
+                )
+                
+            await db.commit()
+            logging.info("Модели от DDC успешно обновлены.")
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении моделей от DDC: {e}")
+            await db.rollback()
+
+async def update_models_from_github():
+    async with get_db_connection() as db:
+        try:
+            provider = "github"
+            if provider not in providers_config:
+                logging.warning(f"Провайдер '{provider}' не найден в providers_config. Обновление моделей пропущено.")
+                return
+
+            token = providers_config[provider].get("api_key")
+            if not token:
+                logging.error(f"API ключ для '{provider}' не найден в конфигурации.")
+                return
+
+            await db.execute("DELETE FROM models WHERE api = ?", (provider,))
+            await db.execute("DELETE FROM image_recognition_models WHERE api = ?", (provider,))
+
+            url = "https://models.github.ai/v1/models"
+            headers = {"Authorization": f"Bearer {token}"}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        models_data = await response.json()
+                        
+                        new_models = []
+                        new_image_recognition_models = []
+                        
+                        for model_info in models_data.get("data", []):
+                            model_id = model_info.get("id")
+                            if not model_id:
+                                continue
+                            
+                            model_name = model_info.get("name")
+                            api = provider
+                            
+                            new_models.append({
+                                "model_id": model_id,
+                                "model_name": model_name,
+                                "api": api
+                            })
+
+                            if "image" in model_info.get("supported_input_modalities", []):
+                                new_image_recognition_models.append({
+                                    "model_id": model_id,
+                                    "api": api
+                                })
+
+                        if new_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
+                                [(m["model_id"], m["model_name"], m["api"]) for m in new_models]
+                            )
+                        
+                        if new_image_recognition_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                                [(m["model_id"], m["api"]) for m in new_image_recognition_models]
+                            )
+                            
+                        await db.commit()
+                        logging.info("Модели от GitHub успешно обновлены.")
+                    else:
+                        logging.error(f"Ошибка при получении моделей от GitHub: HTTP {response.status}")
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении моделей от GitHub: {e}")
+            await db.rollback()
+
+async def update_models_from_electronhub():
+    async with get_db_connection() as db:
+        try:
+            api_name = "electronhub"
+            await db.execute("DELETE FROM models WHERE api = ?", (api_name,))
+            await db.execute("DELETE FROM image_recognition_models WHERE api = ?", (api_name,))
+
+            url = "https://api.electronhub.ai/v1/models"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        models_data = await response.json()
+                        
+                        new_models = []
+                        new_image_recognition_models = []
+                        
+                        for model_info in models_data.get("data", []):
+                            model_id = model_info.get("id")
+                            if model_id and ":free" in model_id:
+                                model_name = model_info.get("name")
+                                
+                                new_models.append({
+                                    "model_id": model_id,
+                                    "model_name": model_name,
+                                    "api": api_name
+                                })
+
+                                if model_info.get("metadata", {}).get("vision"):
+                                    new_image_recognition_models.append({
+                                        "model_id": model_id,
+                                        "api": api_name
+                                    })
+
+                        if new_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
+                                [(m["model_id"], m["model_name"], m["api"]) for m in new_models]
+                            )
+                        
+                        if new_image_recognition_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                                [(m["model_id"], m["api"]) for m in new_image_recognition_models]
+                            )
+                            
+                        await db.commit()
+                        logging.info(f"Модели от {api_name.capitalize()} успешно обновлены.")
+                    else:
+                        logging.error(f"Ошибка при получении моделей от {api_name.capitalize()}: HTTP {response.status}")
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении моделей от {api_name.capitalize()}: {e}")
             await db.rollback()
 
 def is_allowed(user_id):
