@@ -18,7 +18,8 @@ from PIL import Image
 from .messages import DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
 import requests
 from deep_translator import GoogleTranslator
-
+from handlers.check import check_in_progress, set_in_progress, clear_in_progress
+import base64
 
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
@@ -28,6 +29,12 @@ pollinations_edit_models = ["nanobanana", "seedream"]
 
 
 async def process_image_generation_prompt(message: types.Message, state: FSMContext):
+    can_proceed = await check_in_progress(message, state)
+    if not can_proceed:
+        return
+    
+    await set_in_progress(state)
+    
     start_time = time.time()
 
     data = await state.get_data()
@@ -382,16 +389,20 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
 
 
     await calculate_and_show_processing_time(message, user_context, start_time)
-
+    
+    await clear_in_progress(state)
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_generation_prompt=None)
     await state.update_data(aspect_ratio=None)
     await state.update_data(enhance=None)
     await state.update_data(original_message_id=None)
 
+IMGBB_API_KEY = "4b6725b04c24d8f48b448da6281fea42" 
 
-
+    
 async def process_image_editing(message: types.Message, state: FSMContext):
+    await set_in_progress(state) 
+    
     start_time = time.time()
     user_id = message.from_user.id
     
@@ -423,36 +434,44 @@ async def process_image_editing(message: types.Message, state: FSMContext):
 
     if api_type == "poli" and model_id in pollinations_edit_models:
         try:
-            # --- Функция upload_to_catbox определена внутри, как вы просили ---
-            def upload_to_catbox(image_bytes: bytes) -> str:
-                """
-                Загружает изображение на хостинг catbox.moe и возвращает прямую ссылку.
-                """
+            def upload_to_imgbb(image_bytes: bytes) -> str:
                 try:
-                    url = "https://catbox.moe/user/api.php"
-                    payload = {'reqtype': 'fileupload'}
-                    files = {'fileToUpload': ('image.jpg', image_bytes, 'image/jpeg')}
+                    if not IMGBB_API_KEY or IMGBB_API_KEY == "ВАШ_API_КЛЮЧ_С_САЙТА_IMGBB":
+                        raise ValueError("API-ключ для ImgBB не указан. Получите его на api.imgbb.com")
+
+                    url = "https://api.imgbb.com/1/upload"
                     
-                    response = requests.post(url, data=payload, files=files, timeout=15)
+                    # Кодируем изображение в base64, как того требует API ImgBB
+                    encoded_image = base64.b64encode(image_bytes)
+                    
+                    payload = {
+                        'key': IMGBB_API_KEY,
+                        'image': encoded_image
+                    }
+                    
+                    logging.info(f"Попытка загрузки на ImgBB: {len(image_bytes)} байт")
+                    
+                    response = requests.post(url, data=payload, timeout=30)
                     
                     if response.status_code == 200:
-                        image_url = response.text.strip()
-                        if image_url.startswith('http'):
-                            logging.info(f"Изображение успешно загружено на Catbox: {image_url}")
+                        result = response.json()
+                        if result['success']:
+                            image_url = result['data']['url']
+                            logging.info(f"Изображение успешно загружено на ImgBB: {image_url}")
                             return image_url
                         else:
-                            raise Exception(f"Не удалось получить корректный URL от Catbox.moe. Ответ: {image_url}")
+                            error_message = result.get('error', {}).get('message', 'Неизвестная ошибка от API ImgBB')
+                            raise Exception(f"API ImgBB вернуло ошибку: {error_message}")
                     else:
-                        raise Exception(f"Ошибка загрузки на хостинг Catbox.moe: {response.status_code}, {response.text}")
+                        raise Exception(f"Ошибка загрузки на хостинг ImgBB: {response.status_code}, {response.text}")
 
                 except requests.exceptions.RequestException as e:
-                    logging.error(f"Сетевая ошибка при загрузке на Catbox.moe: {e}")
-                    raise Exception(f"Сетевая ошибка при загрузке на Catbox.moe: {e}")
+                    logging.error(f"Сетевая ошибка при загрузке на ImgBB: {e}")
+                    raise Exception(f"Сетевая ошибка при загрузке на ImgBB: {e}")
                 except Exception as e:
-                    logging.error(f"Произошла ошибка в функции upload_to_catbox: {e}")
+                    logging.error(f"Произошла ошибка в функции upload_to_imgbb: {e}")
                     raise e
-            
-            # --------------------------------------------------------------------
+                
 
             if isinstance(image_data, list):
                 image_data = image_data[0]
@@ -462,8 +481,8 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             else:
                 image_bytes = image_data
 
-            # Вызов вложенной функции через отдельный поток
-            image_url = await asyncio.to_thread(upload_to_catbox, image_bytes)
+            image_url = await asyncio.to_thread(upload_to_imgbb, image_bytes)
+
 
             # Получаем размеры изображения
             with Image.open(BytesIO(image_bytes)) as img:
@@ -471,7 +490,6 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 if width * height < 921600:
                     logging.info(f"Image is too small ({width}x{height}={width*height} pixels). Resizing...")
                     aspect_ratio = width / height
-                    # Ensure total pixels are slightly above the minimum requirement
                     scale_factor = (921600 / (width * height)) ** 0.5 * 1.01
                     new_width = int(width * scale_factor)
                     new_height = int(height * scale_factor)
@@ -479,7 +497,6 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                     img = img.resize((new_width, new_height), Image.LANCZOS)
                     logging.info(f"Image resized to {new_width}x{new_height}={new_width*new_height} pixels.")
                     
-                    # Сохраняем измененное изображение в байты
                     buffer = BytesIO()
                     img.save(buffer, format="JPEG")
                     image_bytes = buffer.getvalue()
@@ -499,7 +516,6 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 "token": "I8ez0Tiphl9ksnCT"
             }
             
-            # Используем импортированную в начале файла функцию urlencode
             query_string = urlencode(params)
             full_url = f"{base_url}?{query_string}"
             logging.info(f"Запрос к Pollinations: {full_url}")
@@ -672,6 +688,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
     
     await calculate_and_show_processing_time(message, user_context, start_time)
     
+    await clear_in_progress(state)
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_edit_data=None)
     await state.update_data(image_edit_instructions=None)
