@@ -406,6 +406,8 @@ async def initialize_database():
         await update_models_from_ddc()
         await update_models_from_github()
         await update_models_from_electronhub()
+        await update_models_from_airforce() # Add this line
+        await update_models_from_mnn()
         await initialize_models()
         await db.execute("CREATE INDEX IF NOT EXISTS idx_user_contexts_user_id ON user_contexts (user_id)")
 
@@ -1016,6 +1018,104 @@ async def update_models_from_electronhub():
         except Exception as e:
             logging.error(f"Ошибка при обновлении моделей от {api_name.capitalize()}: {e}")
             await db.rollback()
+
+async def update_models_from_airforce():
+    async with get_db_connection() as db:
+        try:
+            api_name = "airforce"
+            await db.execute("DELETE FROM models WHERE api = ?", (api_name,))
+
+            url = "https://api.airforce/v1/models"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        models_data = await response.json()
+                        
+                        new_models = []
+                        
+                        for model_info in models_data.get("data", []):
+                            if model_info.get("supports_chat"):
+                                model_id = model_info.get("id")
+                                if not model_id:
+                                    continue
+                                
+                                model_name = model_id # model_name is also id as per instructions
+                                
+                                new_models.append({
+                                    "model_id": model_id,
+                                    "model_name": model_name,
+                                    "api": api_name
+                                })
+
+                        if new_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
+                                [(m["model_id"], m["model_name"], m["api"]) for m in new_models]
+                            )
+                            
+                        await db.commit()
+                        logging.info(f"Модели от {api_name.capitalize()} успешно обновлены.")
+                    else:
+                        logging.error(f"Ошибка при получении моделей от {api_name.capitalize()}: HTTP {response.status}")
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении моделей от {api_name.capitalize()}: {e}")
+            await db.rollback()
+async def update_models_from_mnn():
+    async with get_db_connection() as db:
+        try:
+            api_name = "mnn"
+            await db.execute("DELETE FROM models WHERE api = ?", (api_name,))
+            await db.execute("DELETE FROM image_recognition_models WHERE api = ?", (api_name,))
+
+            url = "https://api.mnnai.ru/v1/models"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        models_data = await response.json()
+                        
+                        new_models = []
+                        new_image_recognition_models = []
+                        
+                        for model_info in models_data.get("data", []):
+                            if model_info.get("type") == "chat.completions":
+                                model_id = model_info.get("id")
+                                if not model_id:
+                                    continue
+                                
+                                model_name = model_id # model_name is also id as per instructions
+                                
+                                new_models.append({
+                                    "model_id": model_id,
+                                    "model_name": model_name,
+                                    "api": api_name
+                                })
+
+                                if model_info.get("vision"):
+                                    new_image_recognition_models.append({
+                                        "model_id": model_id,
+                                        "api": api_name
+                                    })
+
+                        if new_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
+                                [(m["model_id"], m["model_name"], m["api"]) for m in new_models]
+                            )
+                        
+                        if new_image_recognition_models:
+                            await db.executemany(
+                                "INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                                [(m["model_id"], m["api"]) for m in new_image_recognition_models]
+                            )
+                            
+                        await db.commit()
+                        logging.info(f"Модели от {api_name.upper()} успешно обновлены.")
+                    else:
+                        logging.error(f"Ошибка при получении моделей от {api_name.upper()}: HTTP {response.status}")
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении моделей от {api_name.upper()}: {e}")
+            await db.rollback()
+
 
 def is_allowed(user_id):
     return user_id in ALLOWED_USER_IDS
