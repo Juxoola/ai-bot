@@ -291,9 +291,9 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                 current_time = time.strftime("%H:%M:%S", time.localtime())
                 logging.info(f"[{current_time}] Начало запроса к G4F API{' (длинное сообщение)' if is_long_message else ''}")
 
-                def g4f_request():
-                    user_g4f_client = get_client(user_id, "g4f_client", model_name=model_id)
-                    return user_g4f_client.chat.completions.create(
+                async def g4f_request():
+                    user_g4f_client = await get_client(user_id, "g4f_client", model_name=model_id)
+                    return await user_g4f_client.chat.completions.create(
                         model=model_id,
                         messages=user_context["messages"],
                     )

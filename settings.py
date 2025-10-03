@@ -222,7 +222,7 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
             
         if new_api_type == "g4f":
             model_name=model_key.replace("_g4f", "")
-            await update_user_clients, user_id, model_name
+            await update_user_clients(user_id, model_name)
 
         user_context.update({
             "model": model_key,
