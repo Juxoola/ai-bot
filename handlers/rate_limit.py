@@ -3,11 +3,9 @@ import time
 import asyncio
 from aiogram.enums import ParseMode
 
-# Словарь для отслеживания запросов пользователей
-# Структура: {user_id: {action_type: [timestamp1, timestamp2, ...]}}
+
 rate_limit_data = {}
 
-# Максимальное количество запросов в минуту
 MAX_REQUESTS_PER_MINUTE = 10
 
 async def check_rate_limit(message: types.Message, action_type: str) -> bool:
@@ -15,21 +13,17 @@ async def check_rate_limit(message: types.Message, action_type: str) -> bool:
     user_id = message.from_user.id
     current_time = time.time()
     
-    # Инициализация данных для пользователя, если их еще нет
     if user_id not in rate_limit_data:
         rate_limit_data[user_id] = {}
     
-    # Инициализация данных для типа действия
     if action_type not in rate_limit_data[user_id]:
         rate_limit_data[user_id][action_type] = []
     
-    # Очистка устаревших записей (старше 60 секунд)
     rate_limit_data[user_id][action_type] = [
         timestamp for timestamp in rate_limit_data[user_id][action_type]
         if current_time - timestamp < 60
     ]
     
-    # Проверка лимита
     if len(rate_limit_data[user_id][action_type]) >= MAX_REQUESTS_PER_MINUTE:
         oldest_timestamp = rate_limit_data[user_id][action_type][0]
         wait_time = 60 - (current_time - oldest_timestamp)
@@ -40,7 +34,6 @@ async def check_rate_limit(message: types.Message, action_type: str) -> bool:
         )
         return False
     
-    # Добавляем текущий запрос
     rate_limit_data[user_id][action_type].append(current_time)
     return True
 
@@ -50,21 +43,17 @@ async def check_callback_rate_limit(callback_query: types.CallbackQuery, action_
     user_id = callback_query.from_user.id
     current_time = time.time()
     
-    # Инициализация данных для пользователя, если их еще нет
     if user_id not in rate_limit_data:
         rate_limit_data[user_id] = {}
     
-    # Инициализация данных для типа действия
     if action_type not in rate_limit_data[user_id]:
         rate_limit_data[user_id][action_type] = []
     
-    # Очистка устаревших записей (старше 60 секунд)
     rate_limit_data[user_id][action_type] = [
         timestamp for timestamp in rate_limit_data[user_id][action_type]
         if current_time - timestamp < 60
     ]
     
-    # Проверка лимита
     if len(rate_limit_data[user_id][action_type]) >= MAX_REQUESTS_PER_MINUTE:
         oldest_timestamp = rate_limit_data[user_id][action_type][0]
         wait_time = 60 - (current_time - oldest_timestamp)
@@ -76,6 +65,5 @@ async def check_callback_rate_limit(callback_query: types.CallbackQuery, action_
         )
         return False
     
-    # Добавляем текущий запрос
     rate_limit_data[user_id][action_type].append(current_time)
     return True 

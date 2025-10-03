@@ -5,9 +5,13 @@ from aiogram import types
 from aiogram.fsm.context import FSMContext
 from config import Form, get_openai_client, bot
 from database import load_context, save_context
-from .messages import call_openai_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
+from .messages import call_openai_completion_async, async_run_with_timeout, DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
 import time
-from datetime import timedelta
+import base64
+import logging
+import asyncio
+
+
 async def process_image_with_openai(message: types.Message, state: FSMContext, prompt: str):
     start_time = time.time()
 
@@ -44,7 +48,7 @@ async def process_image_with_openai(message: types.Message, state: FSMContext, p
     try:
         logging.info(f"[{start_time}] Начало запроса к OpenAI API IMAGE ({api_type}) с моделью {model}.")
         completion = await async_run_with_timeout(
-            call_openai_completion_sync,
+            call_openai_completion_async,
             DEFAULT_API_TIMEOUT,
             api_type, 
             model, 

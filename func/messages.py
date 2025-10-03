@@ -250,10 +250,9 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
         # Обработка через G4F API
         if api_type == "g4f":
             if user_context["g4f_image"] and (not is_long_message or model_id == user_context["image_recognition_model"]):
-                def g4f_image_request():
-                    user_g4f_client = get_client(user_id, "g4f_image_client", model_name=model_id)
+                async def g4f_image_request():
+                    user_g4f_client = await get_client(user_id, "g4f_image_client", model_name=model_id)
                     
-                    # BytesIO to base64
                     image_data = user_context["g4f_image"]
                     if hasattr(image_data, 'read') and not isinstance(image_data, str):
                         if hasattr(image_data, 'seek'):
@@ -265,7 +264,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                     else:
                         image_to_use = image_data
                     
-                    return user_g4f_client.chat.completions.create(
+                    return await user_g4f_client.chat.completions.create(
                         model=model_id,
                         messages=user_context["messages"] if not is_long_message else [{"role": "user", "content": message_text}],
                         image=image_to_use,
@@ -325,7 +324,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
 
         # Обработка через Gemini API
         elif api_type == "gemini":
-            def gemini_request():
+            async def gemini_request():
                 system_instruction = None
                 history_for_model = []
                 
@@ -357,7 +356,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                     system_instruction=system_instruction
                 ) if system_instruction else None
                 
-                response = gemini_client.models.generate_content(
+                response = await gemini_client.aio.models.generate_content(
                     model=model_id,
                     contents=history_for_model,
                     config=config
@@ -398,7 +397,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
         elif api_type in openai_clients:
             if not is_long_message and model_id == "openai-audio":
                 try:
-                    client = get_openai_client(api_type)
+                    client = await get_openai_client(api_type)
                     logging.info(f"Начало прямого запроса к OpenAI Audio API")
                     
                     current_message = []
@@ -426,8 +425,8 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                     user_context = await load_context(user_id)
                     voice = user_context.get("voice")
                     
-                    def audio_api_request():
-                        return client.chat.completions.create(
+                    async def audio_api_request():
+                        return await client.chat.completions.create(
                             model=model_id,
                             modalities=["text", "audio"],
                             audio={"voice": voice, "format": "wav"},
@@ -493,7 +492,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
             else:
                 if should_bypass_timeout(model_id, api_type):
                     try:
-                        result = await async_run_with_timeout(call_openai_completion_sync, EXTENDED_API_TIMEOUT, api_type, model_id, user_context["messages"])
+                        result = await async_run_with_timeout(call_openai_completion_async, EXTENDED_API_TIMEOUT, api_type, model_id, user_context["messages"])
                         logging.info(f"Запрос к {api_type} API с моделью {model_id} выполнен с расширенным таймаутом {EXTENDED_API_TIMEOUT} сек{' в режиме длинного сообщения' if is_long_message else ''}")
                     except TimeoutError as e:
                         logging.error(f"Timeout in openai_client request{' (long message)' if is_long_message else ''}: {e}")
@@ -501,7 +500,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
                         result = None
                 else:
                     try:
-                        result = await async_run_with_timeout(call_openai_completion_sync, DEFAULT_API_TIMEOUT, api_type, model_id, user_context["messages"])
+                        result = await async_run_with_timeout(call_openai_completion_async, DEFAULT_API_TIMEOUT, api_type, model_id, user_context["messages"])
                     except TimeoutError as e:
                         logging.error(f"Timeout in openai_client request{' (long message)' if is_long_message else ''}: {e}")
                         await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
@@ -826,14 +825,13 @@ async def handle_long_message(message: types.Message, state: FSMContext):
     await message.reply("🔔Сообщение добавлено к накоплению.")
     await state.set_state(Form.waiting_for_long_message)
 
-def call_openai_completion_sync(api_type, model, messages, **kwargs):
-    """Синхронная версия для вызова OpenAI API, которая используется в async_run_with_timeout."""
-    client = get_openai_client(api_type)
+async def call_openai_completion_async(api_type, model, messages, **kwargs):
+    client = await get_openai_client(api_type)
     start_time = time.time()
     start_timestamp = time.strftime("%H:%M:%S", time.localtime(start_time))
     logging.info(f"[{start_timestamp}] Начало запроса к OpenAI API ({api_type}) с моделью {model}.")
     try:
-        result =  client.chat.completions.create(model=model, messages=messages, **kwargs)
+        result = await client.chat.completions.create(model=model, messages=messages, **kwargs)
         end_time = time.time()
         duration = end_time - start_time
         end_timestamp = time.strftime("%H:%M:%S", time.localtime(end_time))
@@ -847,7 +845,6 @@ def call_openai_completion_sync(api_type, model, messages, **kwargs):
         raise
 
 def call_anthropic_completion_sync(api_type, model, messages, system=None, **kwargs):
-    """Синхронная версия для вызова Anthropic API, которая используется в async_run_with_timeout."""
     client = get_anthropic_client(api_type)
     start_time = time.time()
     start_timestamp = time.strftime("%H:%M:%S", time.localtime(start_time))
@@ -872,37 +869,7 @@ def call_anthropic_completion_sync(api_type, model, messages, system=None, **kwa
         logging.error(f"[{end_timestamp}] Ошибка при выполнении запроса к Anthropic API ({api_type}) с моделью {model} после {duration:.2f} секунд: {e}")
         raise
 
-def run_in_process(func, timeout, *args, **kwargs):
-    """Запускает блокирующую функцию func в отдельном процессе с таймаутом.
-    Если функция не завершилась за timeout секунд, процесс принудительно завершается.
-    Результат (или исключение) передается через очередь."""
-    result_queue = multiprocessing.Queue()
-
-    def wrapper():
-        try:
-            result = func(*args, **kwargs)
-            result_queue.put((True, result))
-        except Exception as ex:
-            result_queue.put((False, ex))
-
-    process = multiprocessing.Process(target=wrapper)
-    process.start()
-    process.join(timeout)
-    if process.is_alive():
-        process.terminate()
-        process.join(1)
-        raise TimeoutError(f"Вызов функции превысил таймаут {timeout} сек.")
-    try:
-        success, result = result_queue.get_nowait()
-        if success:
-            return result
-        else:
-            raise result
-    except queue.Empty:
-        raise Exception("Ошибка: функция не вернула результат.")
-
 async def async_run_with_timeout(func, timeout, *args, **kwargs):
-    """Асинхронная обёртка для запуска блокирующих функций с таймаутом."""
     try:
         if asyncio.iscoroutinefunction(func):
             task = asyncio.create_task(func(*args, **kwargs))

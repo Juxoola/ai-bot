@@ -14,7 +14,7 @@ import os
 from duckduckgo_search import DDGS
 from duckduckgo_search.exceptions import DuckDuckGoSearchException
 from google.genai import types as genai_types
-from .messages import call_openai_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT
+from .messages import call_openai_completion_async, async_run_with_timeout, DEFAULT_API_TIMEOUT
 
 class SearchResults():
     def __init__(self, results: list, used_words: int):
@@ -172,9 +172,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
     MAX_MESSAGE_LENGTH = 4096
 
     try:
-        search_results = await asyncio.to_thread(
-            lambda: asyncio.run(search(query))
-        )
+        search_results = await search(query)
 
         search_message = f"""
 {str(search_results)}
@@ -196,10 +194,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
         if api_type in openai_clients:
 
             try:
-                result = await async_run_with_timeout(
-                    lambda: call_openai_completion_sync(api_type, model_id, user_context["messages"]),
-                    DEFAULT_API_TIMEOUT
-                )
+                result = await async_run_with_timeout(call_openai_completion_async, DEFAULT_API_TIMEOUT, api_type, model_id, user_context["messages"])
             except TimeoutError as e:
                 logging.error(f"Timeout in openai_client request (long message): {e}")
                 await message.reply("🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT}. Попробуйте еще раз или выберите другую модель.")
@@ -209,15 +204,12 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 response_text = result.choices[0].message.content
                 
         elif api_type in anthropic_clients:
-            # Конвертируем формат сообщений OpenAI в формат Anthropic
             anthropic_messages = []
             system_content = None
             
-            # Извлекаем системное сообщение, если оно есть
             if user_context["messages"] and user_context["messages"][0]["role"] == "system":
                 system_content = user_context["messages"][0]["content"]
             
-            # Добавляем все сообщения кроме системного
             for msg in user_context["messages"]:
                 role = msg["role"]
                 if role == "system":
@@ -238,9 +230,9 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 response_text = result.content[0].text
 
         elif api_type == "g4f":
-            def g4f_request():
-                user_g4f_client = get_client(user_id, "g4f_client", model_name=model_id)
-                return user_g4f_client.chat.completions.create(
+            async def g4f_request():
+                user_g4f_client = await get_client(user_id, "g4f_client", model_name=model_id)
+                return await user_g4f_client.chat.completions.create(
                     model=model_id,
                     messages=user_context["messages"],
                 )
@@ -256,7 +248,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 response_text = response.choices[0].message.content
 
         elif api_type == "gemini":
-            def gemini_request():
+            async def gemini_request():
                 system_instruction = None
                 messages_for_model = []
                 
@@ -275,7 +267,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
                     system_instruction=system_instruction
                 ) if system_instruction else None
 
-                return gemini_client.models.generate_content(
+                return await gemini_client.aio.models.generate_content(
                     model=model_id,
                     contents=messages_for_model,
                     config=config,

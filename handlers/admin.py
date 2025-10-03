@@ -1,4 +1,3 @@
-#admin section
 from aiogram import types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command

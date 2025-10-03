@@ -5,6 +5,8 @@ from config import Form,  bot, DEFAULT_SYSTEM_PROMPTS, gemini_client
 from PIL import Image
 import io
 from database import load_context,save_context
+from .messages import calculate_and_show_processing_time
+import time
 import asyncio
 import base64
 import logging
@@ -14,68 +16,62 @@ import tempfile
 import os
 
 async def handle_image(message: types.Message, state: FSMContext):
-    """
-    Просто получает изображение, кодирует его в base64 и сохраняет во временное
-    хранилище состояний (FSM), не затрагивая историю сообщений.
-    """
+    if not message.photo:
+        await message.reply("🔔 Пожалуйста, отправьте изображение.")
+        return
+
     photo = message.photo[-1]
-    file_id = photo.file_id
-
-    file = await bot.get_file(file_id)
-    file_path = file.file_path
-
-    image_data = await bot.download_file(file_path)
-
-    base64_image = await asyncio.to_thread(
-        lambda: base64.b64encode(image_data.read()).decode('utf-8')
+    
+    img_byte_io = io.BytesIO()
+    await bot.download(file=photo.file_id, destination=img_byte_io)
+    
+    img_b64_str = await asyncio.to_thread(
+        base64.b64encode, img_byte_io.getvalue()
     )
 
-    await state.update_data(image_data=base64_image)
-    await message.reply("🔔Изображение получено. Теперь отправьте текстовый промпт.")
+    await state.update_data(image_data=img_b64_str.decode('utf-8'))
+    await message.reply("🔔 Изображение получено. Теперь отправьте текстовый промпт.")
 
 
 async def process_custom_image_prompt(message: types.Message, state: FSMContext):
-    """
-    Обрабатывает первый запрос с изображением через stateless generate_content
-    и корректно сохраняет мультимодальный диалог в историю.
-    """
+    start_time = time.time()
     user_id = message.from_user.id
     prompt = message.text
-    data = await state.get_data()
-    base64_image = data.get("image_data")
-
-    if not base64_image:
-        await message.reply("🔔Сначала отправьте изображение.")
-        return
-
-    user_context = await load_context(user_id)
-    model_id, _ = user_context["model"].split('_')
-
+    
     try:
-        image_bytes = base64.b64decode(base64_image)
-        pil_image = Image.open(io.BytesIO(image_bytes))
+        data, user_context = await asyncio.gather(
+            state.get_data(),
+            load_context(user_id)
+        )
 
-        system_instruction = None
-        for msg in user_context["messages"]:
-            if msg.get("role") == "system":
-                system_instruction = msg["parts"][0]["text"]
-                break
+        base64_image = data.get("image_data")
+        if not base64_image:
+            await message.reply("🔔 Сначала отправьте изображение.")
+            return
+
+        model_id, _ = user_context["model"].split('_')
+
+        def _prepare_image(b64_data):
+            image_bytes = base64.b64decode(b64_data)
+            return Image.open(io.BytesIO(image_bytes))
+
+        pil_image = await asyncio.to_thread(_prepare_image, base64_image)
+
+        system_instruction = next(
+            (msg["parts"][0]["text"] for msg in user_context.get("messages", []) if msg.get("role") == "system"),
+            DEFAULT_SYSTEM_PROMPTS.get(user_context.get("system_role", "default"))
+        )
         
-        if not system_instruction:
-            system_instruction = DEFAULT_SYSTEM_PROMPTS.get(user_context.get("system_role", "default"))
+        user_context["messages"] = [{"role": "system", "parts": [{"text": system_instruction}]}]
 
         config = genai_types.GenerateContentConfig(
             system_instruction=system_instruction
         ) if system_instruction else None
 
-        user_context["messages"] = [{"role": "system", "parts": [{"text": system_instruction}]}]
-
-        response = await asyncio.to_thread(
-            lambda: gemini_client.models.generate_content(
-                model=model_id,
+        response =   gemini_client.aio.models.generate_content(
+            model=model_id,
                 contents=[pil_image, prompt], 
                 config=config,
-            )
         )
         response_text = response.text
 
@@ -87,13 +83,14 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
             ]
         })
         user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
-        await save_context(user_id, user_context)
 
+        await save_context(user_id, user_context)
         await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
+        await calculate_and_show_processing_time(message, user_context, start_time)
 
     except Exception as e:
         logging.error(f"Ошибка при обработке изображения/промпта: {e}", exc_info=True)
-        await message.reply(f"🚨Произошла ошибка: {e}")
+        await message.reply(f"🚨 Произошла ошибка: {e}")
     finally:
         await state.set_state(Form.waiting_for_message)
         await state.update_data(image_data=None)

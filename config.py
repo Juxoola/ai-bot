@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 import openai
 import anthropic
 from google import genai
-from g4f.client import Client
+from g4f.client import AsyncClient
 from g4f.Provider import RetryProvider
 from groq import Groq
 from key import GROQ_API_KEY, GEMINI_API_KEY, BOT_TOKEN
@@ -12,6 +12,7 @@ import os
 import logging
 import json
 import importlib
+import aiohttp
 
 
 # Monkey patch для PerplexityLabs - установка working = True
@@ -52,6 +53,8 @@ def should_bypass_timeout(model_id, api_type):
     return False
 
 bot = Bot(token=BOT_TOKEN)
+http_session: aiohttp.ClientSession | None = None
+
 # States
 class Form(StatesGroup):
     waiting_for_message = State()
@@ -135,7 +138,7 @@ for provider, cfg in providers_config.items():
         logging.warning(f"Для провайдера {provider} не задан 'api_key' или 'base_url'. Пропускаем.")
         continue
     
-    openai_clients[provider] = openai.OpenAI(
+    openai_clients[provider] = openai.AsyncOpenAI(
         api_key=api_key, 
         base_url=base_url, 
         max_retries=0
@@ -225,7 +228,7 @@ if raw_provider_image_recognition_models:
 else:
     PROVIDER_IMAGE_RECOGNITION_MODELS = {}
 
-def get_supported_providers(provider_classes, model_name=None):
+async def get_supported_providers(provider_classes, model_name=None):
 
     supported_providers = []
     for provider_class in provider_classes:
@@ -243,28 +246,33 @@ def get_supported_providers(provider_classes, model_name=None):
 
     return supported_providers
 
-g4f_client_providers = get_supported_providers(chat_providers)
-g4f_image_client_providers = get_supported_providers(image_providers) 
+g4f_client_providers = []
+g4f_image_client_providers = []
+
+async def initialize_providers():
+    global g4f_client_providers, g4f_image_client_providers, g4f_client, g4f_image_client
+    g4f_client_providers = await get_supported_providers(chat_providers)
+    g4f_image_client_providers = await get_supported_providers(image_providers)
+    g4f_client = AsyncClient(provider=RetryProvider(g4f_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
+    g4f_image_client = AsyncClient(provider=RetryProvider(g4f_image_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
+
+g4f_client = None
+g4f_image_client = None
 
 
-g4f_client = Client(provider=RetryProvider(g4f_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
-
-g4f_image_client = Client(provider=RetryProvider(g4f_image_client_providers, shuffle=False), image_provider=RetryProvider(g4f_image_client_providers, shuffle=False))
-
-
-def update_g4f_clients(model_name=None):
+async def update_g4f_clients(model_name=None):
 
     global g4f_client, g4f_image_client
 
-    updated_chat_providers = get_supported_providers(chat_providers, model_name)
-    updated_image_providers = get_supported_providers(image_providers, model_name)
+    updated_chat_providers = await get_supported_providers(chat_providers, model_name)
+    updated_image_providers = await get_supported_providers(image_providers, model_name)
 
-    g4f_client = Client(
+    g4f_client = AsyncClient(
         provider=RetryProvider(updated_chat_providers, shuffle=False),
         image_provider=RetryProvider(updated_image_providers, shuffle=False)
     )
 
-    g4f_image_client = Client(
+    g4f_image_client = AsyncClient(
         provider=RetryProvider(updated_image_providers, shuffle=False),
         image_provider=RetryProvider(updated_image_providers, shuffle=False)
     )
@@ -272,47 +280,47 @@ def update_g4f_clients(model_name=None):
 
 user_clients = {} 
 
-def get_user_clients(user_id, model_name=None):
+async def get_user_clients(user_id, model_name=None):
     from g4f.Provider import RetryProvider
-    from g4f.client import Client
+    from g4f.client import AsyncClient
     
-    updated_chat_providers = get_supported_providers(chat_providers, model_name)
-    updated_image_providers = get_supported_providers(image_providers, model_name)
-    updated_image_gen_providers = get_supported_providers(chat_providers, model_name)
+    updated_chat_providers = await get_supported_providers(chat_providers, model_name)
+    updated_image_providers = await get_supported_providers(image_providers, model_name)
+    updated_image_gen_providers =await get_supported_providers(chat_providers, model_name)
     
-    updated_image_recognition_providers = get_image_recognition_providers(model_name)
+    updated_image_recognition_providers = await get_image_recognition_providers(model_name)
     if not updated_image_recognition_providers:
         updated_image_recognition_providers = updated_image_providers
     
     clients = {
-        "g4f_client": Client(
+        "g4f_client": AsyncClient(
             provider=RetryProvider(updated_chat_providers, shuffle=False),
             image_provider=RetryProvider(updated_image_providers, shuffle=False)
         ),
-        "g4f_image_client": Client(
+        "g4f_image_client": AsyncClient(
             provider=RetryProvider(updated_image_providers, shuffle=False),
             image_provider=RetryProvider(updated_image_providers, shuffle=False)
         ),
-        "g4f_image_gen_client": Client(
+        "g4f_image_gen_client": AsyncClient(
             provider=RetryProvider(updated_image_gen_providers, shuffle=False),
             image_provider=RetryProvider(updated_image_gen_providers, shuffle=False)
         ),
     }
     return clients
 
-def update_user_clients(user_id, model_name=None):
+async def update_user_clients(user_id, model_name=None):
 
     global user_clients
-    user_clients[user_id] = get_user_clients(user_id, model_name)
+    user_clients[user_id] = await get_user_clients(user_id, model_name)
 
     import logging
     logging.info(f"Clients updated for user {user_id} with model '{model_name}'")
     return user_clients[user_id]
 
-def get_client(user_id, client_type="g4f_client", model_name=None):
+async def get_client(user_id, client_type="g4f_client", model_name=None):
    
     if user_id not in user_clients:
-        update_user_clients(user_id, model_name)
+       await update_user_clients(user_id, model_name)
     return user_clients.get(user_id).get(client_type)
 
 
@@ -327,26 +335,26 @@ async def init_enhance_prompt_client():
     logging.info(f"Enhance prompt client initialized with model {model_name_e}")
 
 
-def update_image_gen_client(user_id, image_gen_model):
+async def update_image_gen_client(user_id, image_gen_model):
 
     global user_clients
-    from g4f.client import Client
+    from g4f.client import AsyncClient
     from g4f.Provider import RetryProvider
 
-    updated_image_gen_providers = get_supported_providers(chat_providers, image_gen_model)
-    new_client = Client(
+    updated_image_gen_providers = await get_supported_providers(chat_providers, image_gen_model)
+    new_client = AsyncClient(
         provider=RetryProvider(updated_image_gen_providers, shuffle=False),
         image_provider=RetryProvider(updated_image_gen_providers, shuffle=False)
     )
     if user_id not in user_clients:
-        user_clients[user_id] = get_user_clients(user_id, image_gen_model)
+        user_clients[user_id] = await get_user_clients(user_id, image_gen_model)
     else:
         user_clients[user_id]["g4f_image_gen_client"] = new_client
     import logging
     logging.info(f"User {user_id}: Image generation client updated with model '{image_gen_model}'")
     return new_client
 
-def get_openai_client(api_type: str):
+async def get_openai_client(api_type: str):
 
     client = openai_clients.get(api_type)
     if not client:
@@ -361,7 +369,7 @@ def get_anthropic_client(api_type: str):
         raise ValueError(f"Неподдерживаемый тип Anthropic провайдера: {api_type}. Доступные: {available}")
     return client
 
-def get_image_recognition_providers(model_name=None):
+async def get_image_recognition_providers(model_name=None):
     supported_providers = []
     
     for provider_class, models in PROVIDER_IMAGE_RECOGNITION_MODELS.items():
@@ -373,15 +381,14 @@ def get_image_recognition_providers(model_name=None):
 async def update_image_client_for_recognition(user_id, image_rec_model):
 
     global user_clients
-    from g4f.client import Client
     from g4f.Provider import RetryProvider
 
-    image_rec_providers = get_image_recognition_providers(image_rec_model)
+    image_rec_providers = await get_image_recognition_providers(image_rec_model)
     
 
     if not image_rec_providers:
         logging.warning(f"Для модели '{image_rec_model}' нет провайдеров с поддержкой распознавания изображений")
-        image_rec_providers = get_supported_providers(image_providers, image_rec_model)
+        image_rec_providers = await get_supported_providers(image_providers, image_rec_model)
         logging.info(f"Используем общие провайдеры изображений: {[p.__name__ for p in image_rec_providers]}")
     
     if len(image_rec_providers) > 0:
@@ -391,13 +398,13 @@ async def update_image_client_for_recognition(user_id, image_rec_model):
         image_rec_providers = image_providers
         logging.info(f"Используем все доступные провайдеры изображений: {[p.__name__ for p in image_rec_providers]}")
     
-    new_client = Client(
+    new_client = AsyncClient(
         provider=RetryProvider(image_rec_providers, shuffle=False),
         image_provider=RetryProvider(image_rec_providers, shuffle=False)
     )
     
     if user_id not in user_clients:
-        user_clients[user_id] = get_user_clients(user_id, image_rec_model)
+        user_clients[user_id] = await get_user_clients(user_id, image_rec_model)
     else:
         user_clients[user_id]["g4f_image_client"] = new_client
     

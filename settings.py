@@ -128,9 +128,7 @@ async def select_role_handler(callback_query: types.CallbackQuery, state: FSMCon
     await state.set_state(Form.waiting_for_role_selection)
 
 async def update_setting_and_refresh_keyboard(callback_query, state, user_context):
-    """
-    Helper function to update the settings menu after a setting change
-    """
+
     user_id = callback_query.from_user.id
     await save_context(user_id, user_context)
 
@@ -224,7 +222,7 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
             
         if new_api_type == "g4f":
             model_name=model_key.replace("_g4f", "")
-            await asyncio.to_thread(update_user_clients, user_id, model_name)
+            await update_user_clients, user_id, model_name
 
         user_context.update({
             "model": model_key,
@@ -262,7 +260,6 @@ async def process_image_generation_model_handler(callback_query, state):
         
     model_key = model_map[short_id]
     
-    # Parse the model_key to get model_id and api
     model_id, api = model_key.split('_', 1)
     
     user_context = await load_context(user_id)
@@ -272,7 +269,7 @@ async def process_image_generation_model_handler(callback_query, state):
     }
 
     if api == "g4f":
-        await asyncio.to_thread(update_image_gen_client, user_id, model_id)
+        await update_image_gen_client(user_id, model_id)
     
     await update_setting_and_refresh_keyboard(callback_query, state, user_context)
     

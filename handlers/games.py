@@ -20,7 +20,6 @@ async def cmd_games_handler(message: types.Message, state: FSMContext):
     if not await check_rate_limit(message, "games"):
         return
     
-    # Проверяем, не находится ли пользователь в процессе выполнения операции
     can_proceed = await check_in_progress(message, state)
     if not can_proceed:
         return
@@ -32,7 +31,6 @@ async def cmd_games_handler(message: types.Message, state: FSMContext):
 async def start_tictactoe_game(callback_query: types.CallbackQuery, state: FSMContext):
     user_id = callback_query.from_user.id
     
-    # Проверяем rate limit для callback
     if not await check_callback_rate_limit(callback_query, "tictactoe_start"):
         return
     
@@ -70,7 +68,6 @@ async def start_tictactoe_game(callback_query: types.CallbackQuery, state: FSMCo
         await state.set_state(Form.playing_tictactoe)
         
         if game.current_player == COMPUTER:
-            # Run the CPU-intensive computer move in a separate thread to avoid blocking
             await asyncio.to_thread(game.computer_move)
             keyboard = get_game_keyboard(game)
             
@@ -91,12 +88,10 @@ async def start_tictactoe_game(callback_query: types.CallbackQuery, state: FSMCo
 
 @dp.callback_query(lambda c: c.data and (c.data.startswith("ttt_") or c.data == "ttt_restart" or c.data == "ttt_exit"))
 async def tictactoe_callback_handler(callback_query: types.CallbackQuery, state: FSMContext):
-    # Для кнопок игры мы не применяем rate limit, чтобы не нарушать игровой процесс
-    # Rate limit будет применяться только при старте игры
+
     try:
         await process_tictactoe_callback(callback_query, state)
     except Exception as e:
-        # В случае ошибки очищаем состояние игры
         await state.set_state(Form.waiting_for_message)
         await callback_query.message.reply(f"🔔 Произошла ошибка в игре: {e}")
         await callback_query.answer()
