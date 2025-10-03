@@ -2,6 +2,12 @@ from aiogram import types, F
 import asyncio
 import random
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+MAX_RETRIES = 3
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
@@ -135,19 +141,31 @@ async def cmd_restore_keyboard(message: types.Message, state: FSMContext):
 
 
 async def fetch_random_meme():
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get("https://meme-api.com/gimme")
-            data = response.json()
-            
-            if "url" in data and data["url"]:
-                return {
-                    "url": data["url"],
-                    "title": data.get("title", "Random Meme"),
-                    "source": f"https://reddit.com{data.get('postLink', '')}"
-                }
-    except Exception as e:
-        print(f"Error fetching from meme-api.com: {e}")
+    for attempt in range(MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get("https://meme-api.com/gimme")
+                response.raise_for_status()
+                data = response.json()
+                
+                if "url" in data and data["url"]:
+                    return {
+                        "url": data["url"],
+                        "title": data.get("title", "Random Meme"),
+                        "source": f"https://reddit.com{data.get('postLink', '')}"
+                    }
+                else:
+                    logger.error(f"Attempt {attempt + 1}: Meme API response missing 'url' or 'url' is empty. Data: {data}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Attempt {attempt + 1}: HTTP error fetching from meme-api.com: {e}")
+        except httpx.RequestError as e:
+            logger.error(f"Attempt {attempt + 1}: Request error fetching from meme-api.com: {e}")
+        except Exception as e:
+            logger.error(f"Attempt {attempt + 1}: Unexpected error fetching from meme-api.com: {e}")
+        
+        if attempt < MAX_RETRIES - 1:
+            await asyncio.sleep(1) 
+    return None
 
 
 @dp.message(F.text == "🎭 Мем")
@@ -159,19 +177,17 @@ async def cmd_random_meme(message: types.Message, state: FSMContext):
     
     processing_message = await message.reply("Ищу смешной мем...")
     
-    try:
-        meme = await fetch_random_meme()
-        
+    meme = await fetch_random_meme()
+    
+    if meme:
         await bot.send_photo(
             chat_id=message.chat.id,
             photo=meme["url"],
             caption=f"{meme['title']}"
         )
-        
         await bot.delete_message(chat_id=message.chat.id, message_id=processing_message.message_id)
-        
-    except Exception as e:
-        await processing_message.edit_text(f"Не удалось найти мем. Ошибка: {str(e)}")
+    else:
+        await processing_message.edit_text("Не удалось найти мем. Попробуйте еще раз.")
         
     current_state = await state.get_state()
     if current_state != Form.waiting_for_message:

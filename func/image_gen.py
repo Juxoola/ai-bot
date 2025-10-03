@@ -20,6 +20,7 @@ import requests
 from deep_translator import GoogleTranslator
 from handlers.check import check_in_progress, set_in_progress, clear_in_progress
 import base64
+import os
 
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]
@@ -157,7 +158,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                     "nologo": "true",
                     "private": "true",
                     "safe": "false",
-                    "token": "I8ez0Tiphl9ksnCT"
+                    "token": config.providers_config.get("poli", {}).get("api_key")
                 }
                 response = requests.get(url, params=params)
                 response.raise_for_status()
@@ -194,147 +195,159 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 )
                 break
             except Exception as e:
-                await bot.send_message(
-                    user_id, 
-                    f"🚨Ошибка во время генерации изображения: {e}",
-                    reply_to_message_id=original_message_id
-                )
-                break 
+                logging.error(f"Error during image generation (retry {retry_count + 1}/{max_retries}): {e}")
+                retry_count += 1
+                if retry_count == max_retries:
+                    await bot.send_message(
+                        user_id,
+                        "🚨 Не удалось сгенерировать изображение после нескольких попыток. Пожалуйста, попробуйте еще раз.",
+                        reply_to_message_id=original_message_id
+                    )
+                await asyncio.sleep(1) # Wait a bit before retrying
 
     elif api_type in openai_clients and api_type != "poli":
         client = openai_clients.get(api_type)
-        try:
-            size_str = f"{width}x{height}"
-            def generate_openai_content():
-                return client.images.generate(
-                    model=model_id,
-                    prompt=prompt,
-                    size=size_str,
-                    response_format="url"
-                )
-            
-            response = await async_run_with_timeout(generate_openai_content, DEFAULT_API_TIMEOUT)
-
-            if response is None:
-                return
-            if hasattr(response, 'generated_images'):
-                image_data = response.generated_images[0].image.getvalue()
-            elif hasattr(response, 'data') and response.data:
-                image_url = response.data[0].url
-                if image_url.startswith('data:image/jpeg;base64,'):
-                    import base64
-                    base64_data = image_url.split('base64,')[1]
-                    image_data = base64.b64decode(base64_data)
-                else:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(image_url) as resp:
-                            if resp.status == 200:
-                                image_data = await resp.read()
-                            else:
-                                raise Exception(f"Не удалось скачать изображение, статус: {resp.status}")
-            else:
-                raise Exception(f"Неподдерживаемый формат ответа от {api_type} client")
-            caption = f"Фото сгенерировано {api_type} моделью {model_id}"
-            if aspect_ratio:
-                caption += f" с соотношением сторон {aspect_ratio}"
-            if enhance:
-                caption += f", enhance: {enhance}"
-            caption += ":"
-            await bot.send_photo(
-                user_id,
-                photo=types.BufferedInputFile(image_data, filename="image.jpg"),
-                caption=caption,
-                reply_to_message_id=original_message_id
-            )
-            caption2 = "Фото без сжатия"
-            await bot.send_document(
-                user_id,
-                document=types.BufferedInputFile(image_data, filename="image.jpg"),
-                caption=caption2,
-                reply_to_message_id=original_message_id
-            )
-        except Exception as e:
-            logging.error(f"Error during {api_type} image generation: {e}")
-            await bot.send_message(
-                user_id, 
-                f"🚨Ошибка во время генерации изображения с помощью {api_type} client: {e}",
-                reply_to_message_id=original_message_id
-            )
-
-    elif api_type == "gemini":
-        if gemini_client:
+        retry_count = 0
+        max_retries = 3
+        while retry_count < max_retries:
             try:
-                def generate_gemini_content():
-                    return gemini_client.models.generate_content(
+                size_str = f"{width}x{height}"
+                def generate_openai_content():
+                    return client.images.generate(
                         model=model_id,
-                        contents=prompt,
-                        config=genai_types.GenerateContentConfig(
-                            response_modalities=['TEXT', 'IMAGE']
-                        )
+                        prompt=prompt,
+                        size=size_str,
+                        response_format="url"
                     )
                 
-                response = await async_run_with_timeout(generate_gemini_content, DEFAULT_API_TIMEOUT)
-                
-                if response is None:
-                    return
-                
-                image_data = None
-                text_response = ""
-                
-                for part in response.candidates[0].content.parts:
-                    if part.text is not None:
-                        text_response += part.text
-                    
-                    elif part.inline_data is not None and part.inline_data.mime_type.startswith('image/'):
-                        image = await asyncio.to_thread(
-                            lambda: Image.open(BytesIO(part.inline_data.data))
-                        )
-                        img_byte_arr = BytesIO()
-                        await asyncio.to_thread(
-                            lambda: image.save(img_byte_arr, format='JPEG')
-                        )
-                        image_data = img_byte_arr.getvalue()
-                
-                if not image_data:
-                    error_message = "🚨Модель не сгенерировала изображение в ответе."
-                    if text_response:
-                        error_message += f"\n\nОтвет модели: {text_response}"
-                    await bot.send_message(
-                        user_id, 
-                        error_message,
-                        reply_to_message_id=original_message_id
-                    )
-                    return
+                response = await async_run_with_timeout(generate_openai_content, DEFAULT_API_TIMEOUT)
 
-                caption = f"Фото сгенерировано моделью {model_id}"
+                if response is None:
+                    raise Exception("Превышено время ожидания при генерации изображения.")
+                if hasattr(response, 'generated_images'):
+                    image_data = response.generated_images[0].image.getvalue()
+                elif hasattr(response, 'data') and response.data:
+                    image_url = response.data[0].url
+                    if image_url.startswith('data:image/jpeg;base64,'):
+                        import base64
+                        base64_data = image_url.split('base64,')[1]
+                        image_data = base64.b64decode(base64_data)
+                    else:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(image_url) as resp:
+                                if resp.status == 200:
+                                    image_data = await resp.read()
+                                else:
+                                    raise Exception(f"Не удалось скачать изображение, статус: {resp.status}")
+                else:
+                    raise Exception(f"Неподдерживаемый формат ответа от {api_type} client")
+                caption = f"Фото сгенерировано {api_type} моделью {model_id}"
+                if aspect_ratio:
+                    caption += f" с соотношением сторон {aspect_ratio}"
                 if enhance:
                     caption += f", enhance: {enhance}"
                 caption += ":"
-                
                 await bot.send_photo(
                     user_id,
                     photo=types.BufferedInputFile(image_data, filename="image.jpg"),
                     caption=caption,
                     reply_to_message_id=original_message_id
                 )
-                
                 caption2 = "Фото без сжатия"
                 await bot.send_document(
-                    user_id, 
+                    user_id,
                     document=types.BufferedInputFile(image_data, filename="image.jpg"),
                     caption=caption2,
                     reply_to_message_id=original_message_id
                 )
+                break
             except Exception as e:
-                logging.error(f"Error during Gemini image generation: {e}")
-                await bot.send_message(
-                    user_id, 
-                    f"🚨Ошибка во время генерации изображения с помощью Gemini API: {e}",
-                    reply_to_message_id=original_message_id
-                )
+                logging.error(f"Error during {api_type} image generation (retry {retry_count + 1}/{max_retries}): {e}")
+                retry_count += 1
+                if retry_count == max_retries:
+                    await bot.send_message(
+                        user_id,
+                        "🚨 Не удалось сгенерировать изображение после нескольких попыток. Пожалуйста, попробуйте еще раз.",
+                        reply_to_message_id=original_message_id
+                    )
+                await asyncio.sleep(1) # Wait a bit before retrying
+
+    elif api_type == "gemini":
+        if gemini_client:
+            retry_count = 0
+            max_retries = 3
+            while retry_count < max_retries:
+                try:
+                    def generate_gemini_content():
+                        return gemini_client.models.generate_content(
+                            model=model_id,
+                            contents=prompt,
+                            config=genai_types.GenerateContentConfig(
+                                response_modalities=['TEXT', 'IMAGE']
+                            )
+                        )
+                    
+                    response = await async_run_with_timeout(generate_gemini_content, DEFAULT_API_TIMEOUT)
+                    
+                    if response is None:
+                        raise Exception("Превышено время ожидания при генерации изображения.")
+                    
+                    image_data = None
+                    text_response = ""
+                    
+                    for part in response.candidates[0].content.parts:
+                        if part.text is not None:
+                            text_response += part.text
+                        
+                        elif part.inline_data is not None and part.inline_data.mime_type.startswith('image/'):
+                            image = await asyncio.to_thread(
+                                lambda: Image.open(BytesIO(part.inline_data.data))
+                            )
+                            img_byte_arr = BytesIO()
+                            await asyncio.to_thread(
+                                lambda: image.save(img_byte_arr, format='JPEG')
+                            )
+                            image_data = img_byte_arr.getvalue()
+                    
+                    if not image_data:
+                        error_message = "🚨Модель не сгенерировала изображение в ответе."
+                        if text_response:
+                            error_message += f"\n\nОтвет модели: {text_response}"
+                        raise Exception(error_message)
+
+                    caption = f"Фото сгенерировано моделью {model_id}"
+                    if enhance:
+                        caption += f", enhance: {enhance}"
+                    caption += ":"
+                    
+                    await bot.send_photo(
+                        user_id,
+                        photo=types.BufferedInputFile(image_data, filename="image.jpg"),
+                        caption=caption,
+                        reply_to_message_id=original_message_id
+                    )
+                    
+                    caption2 = "Фото без сжатия"
+                    await bot.send_document(
+                        user_id,
+                        document=types.BufferedInputFile(image_data, filename="image.jpg"),
+                        caption=caption2,
+                        reply_to_message_id=original_message_id
+                    )
+                    break
+                except Exception as e:
+                    logging.error(f"Error during Gemini image generation (retry {retry_count + 1}/{max_retries}): {e}")
+                    retry_count += 1
+                    if retry_count == max_retries:
+                        await bot.send_message(
+                            user_id,
+                            "🚨 Не удалось сгенерировать изображение после нескольких попыток. Пожалуйста, попробуйте еще раз.",
+                            reply_to_message_id=original_message_id
+                        )
+                    await asyncio.sleep(1) # Wait a bit before retrying
         else:
             await bot.send_message(
-                user_id, 
+                user_id,
                 "🚨Генерация изображений через Gemini недоступна. API-ключ не настроен.",
                 reply_to_message_id=original_message_id
             )
@@ -342,50 +355,57 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     elif api_type == "g4f":
         image_gen_client = get_client(user_id, "g4f_image_gen_client", model_name=model_id)
     
-        try:
-            def generate_g4f_content():
-                return image_gen_client.images.generate(
-                    prompt=prompt,
-                    model=model_id,
-                    response_format="url",
-                    enhance=False,
-                    private=True,
-                    width=width,
-                    height=height,
+        retry_count = 0
+        max_retries = 3
+        while retry_count < max_retries:
+            try:
+                def generate_g4f_content():
+                    return image_gen_client.images.generate(
+                        prompt=prompt,
+                        model=model_id,
+                        response_format="url",
+                        enhance=False,
+                        private=True,
+                        width=width,
+                        height=height,
+                    )
+                
+                response = await async_run_with_timeout(generate_g4f_content, DEFAULT_API_TIMEOUT)
+                
+                if response is None:
+                    raise Exception("Превышено время ожидания при генерации изображения.")
+                
+                image_url = response.data[0].url
+                caption = f"Фото сгенерировано моделью {model_id}"
+                if aspect_ratio:
+                    caption += f" с соотношением сторон {aspect_ratio}"
+                if enhance:
+                    caption += f", enhance: {enhance}"
+                caption += ":"
+                await bot.send_photo(
+                    user_id,
+                    photo=image_url,
+                    caption=caption,
+                    reply_to_message_id=original_message_id
                 )
-            
-            response = await async_run_with_timeout(generate_g4f_content, DEFAULT_API_TIMEOUT)
-            
-            if response is None:
-                return
-            
-            image_url = response.data[0].url
-            caption = f"Фото сгенерировано моделью {model_id}"
-            if aspect_ratio:
-                caption += f" с соотношением сторон {aspect_ratio}"
-            if enhance:
-                caption += f", enhance: {enhance}"
-            caption += ":"
-            await bot.send_photo(
-                user_id,
-                photo=image_url,
-                caption=caption,
-                reply_to_message_id=original_message_id
-            )
-            caption2 = "Фото без сжатия"
-            await bot.send_document(
-                user_id, 
-                document=image_url, 
-                caption=caption2,
-                reply_to_message_id=original_message_id
-            )
-        except Exception as e:
-            logging.error(f"Error during image generation: {e}")
-            await bot.send_message(
-                user_id, 
-                f"🚨Ошибка во время генерации изображения: {e}",
-                reply_to_message_id=original_message_id
-            )
+                caption2 = "Фото без сжатия"
+                await bot.send_document(
+                    user_id,
+                    document=image_url,
+                    caption=caption2,
+                    reply_to_message_id=original_message_id
+                )
+                break
+            except Exception as e:
+                logging.error(f"Error during image generation (retry {retry_count + 1}/{max_retries}): {e}")
+                retry_count += 1
+                if retry_count == max_retries:
+                    await bot.send_message(
+                        user_id,
+                        "🚨 Не удалось сгенерировать изображение после нескольких попыток. Пожалуйста, попробуйте еще раз.",
+                        reply_to_message_id=original_message_id
+                    )
+                await asyncio.sleep(1) # Wait a bit before retrying
 
 
     await calculate_and_show_processing_time(message, user_context, start_time)
@@ -397,7 +417,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     await state.update_data(enhance=None)
     await state.update_data(original_message_id=None)
 
-IMGBB_API_KEY = "4b6725b04c24d8f48b448da6281fea42" 
+IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "key")
 
     
 async def process_image_editing(message: types.Message, state: FSMContext):
@@ -513,7 +533,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 "nologo": "true",
                 "private": "true",
                 "safe": "false",
-                "token": "I8ez0Tiphl9ksnCT"
+                "token": config.providers_config.get("poli", {}).get("api_key")
             }
             
             query_string = urlencode(params)
