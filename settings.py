@@ -4,7 +4,7 @@ from config import bot, Form, update_user_clients, update_image_gen_client, DEFA
 from aiogram.fsm.context import FSMContext
 import logging
 from aiogram import types
-from database import load_context, save_context, av_models, gen_models, rec_models, def_rec_model, def_gen_model, def_aspect, def_enhance, def_voice, av_voices
+from database import load_context, save_context, av_models, gen_models, rec_models, def_gen_model, def_aspect, def_enhance, def_voice, av_voices
 import asyncio
 
 async def cmd_settings(message, state: FSMContext):

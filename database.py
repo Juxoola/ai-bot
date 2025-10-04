@@ -94,9 +94,8 @@ DEFAULT_WHISPER_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]
 
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "openai"
 DEFAULT_IMAGE_GEN_MODEL = "flux_poli"
-DEFAULT_IMAGE_RECOGNITION_MODEL = "gemini-2.0-flash"
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
 DEFAULT_ASPECT_RATIO = "1:1"
 DEFAULT_ENHANCE = True
@@ -477,7 +476,7 @@ async def load_context(user_id):
                 async with db.execute("SELECT model_id, api FROM models WHERE model_id = ?", (DEFAULT_MODEL,)) as cursor:
                     model_row = await cursor.fetchone()
                     model_id = model_row[0] if model_row else DEFAULT_MODEL
-                    api_type = model_row[1] if model_row else AVAILABLE_MODELS[f"{DEFAULT_MODEL}_g4f"]["api"]
+                    api_type = model_row[1] if model_row else AVAILABLE_MODELS[f"{DEFAULT_MODEL}_poli"]["api"]
 
                 if api_type == "gemini":
                     system_message = [{"role": "system", "parts": [{"text": DEFAULT_SYSTEM_PROMPTS["default"]}]}]
@@ -821,7 +820,7 @@ async def update_models_from_ddc(session: aiohttp.ClientSession):
                             if not model_id: continue
                             
                             api = "ddc"
-                            new_models.append((model_id, model_id, api)) # model_name = model_id
+                            new_models.append((model_id, model_id, api))
 
                             if "vision" in model_info.get("features", []):
                                 new_image_recognition_models.append((model_id, api))
@@ -1014,8 +1013,6 @@ async def rec_models():
         print(f"Error loading image recognition models: {e}")
         return {}
 
-async def def_rec_model():
-    return {"model_id": DEFAULT_IMAGE_RECOGNITION_MODEL, "api": "g4f"}
 
 async def def_aspect():
     return DEFAULT_ASPECT_RATIO
