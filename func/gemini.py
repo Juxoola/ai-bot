@@ -68,7 +68,7 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
             system_instruction=system_instruction
         ) if system_instruction else None
 
-        response =   gemini_client.aio.models.generate_content(
+        response = await gemini_client.aio.models.generate_content(
             model=model_id,
                 contents=[pil_image, prompt], 
                 config=config,
@@ -85,7 +85,11 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
         user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
 
         await save_context(user_id, user_context)
-        await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
+        try:
+            await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logging.error(f"Ошибка Markdown при отправке сообщения: {e}")
+            await message.reply(response_text)
         await calculate_and_show_processing_time(message, user_context, start_time)
 
     except Exception as e:

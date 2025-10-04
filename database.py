@@ -94,7 +94,7 @@ DEFAULT_WHISPER_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]
 
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
-DEFAULT_MODEL = "openai"
+DEFAULT_MODEL = "openai-large"
 DEFAULT_IMAGE_GEN_MODEL = "flux_poli"
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
 DEFAULT_ASPECT_RATIO = "1:1"

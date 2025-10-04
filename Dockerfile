@@ -2,8 +2,16 @@
 FROM python:3.12-slim AS builder
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libjpeg-dev \
+    zlib1g-dev \
+    libtiff-dev \
+    libfreetype6-dev \
+    libwebp-dev \
+    libopenjp2-7-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -15,9 +23,18 @@ RUN pip install --upgrade pip && \
 FROM python:3.12-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends antiword \
-    libreoffice-writer libmagic-dev ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+    antiword \
+    libreoffice-writer \
+    libmagic1 \
+    ffmpeg \
+    libjpeg62-turbo \
+    zlib1g \
+    libtiff6 \
+    libfreetype6 \
+    libwebp7 \
+    libopenjp2-7 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /data && chmod 777 /data
 

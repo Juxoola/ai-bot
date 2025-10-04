@@ -84,14 +84,14 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
         "21:9": (2048, 896),
         "9:21": (896, 2048),
         "1:1(2)": (1024, 1024),
-        "3:2(2)": (2496, 1664),
-        "2:3(2)": (1664, 2496),
-        "4:3(2)": (2304, 1856),
-        "3:4(2)": (1856, 2304),
-        "16:9(2)": (2752, 1536),
-        "9:16(2)": (1536, 2752),
-        "21:9(2)": (3136, 1344),
-        "9:21(2)": (1344, 3136),
+        "3:4(2)": (896, 1280),
+        "4:3(2)": (1280, 896),
+        "9:16(2)": (768, 1408),
+        "16:9(2)": (1408, 768),
+        "3:4(3)": (1792, 2560),
+        "4:3(3)": (2560, 1792),
+        "9:16(3)": (1536, 2816),
+        "16:9(3)": (2816, 1536)
     }
     width, height = aspect_ratio_options.get(aspect_ratio, (1024, 1024)) 
 
@@ -120,7 +120,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     if enhance:
         try:
             improved_prompt = await config.openai_clients["poli"].chat.completions.create(
-                        model="openai",
+                        model="openai-large",
                         messages=[
                             {"role": "user", "content": f"You are a text prompt generator for creating images. I will give you a post topic, and you will generate one best-quality prompt and show it to me.\n\n{prompt}\n\nDo not ask for clarifications—just generate the best prompt using your creativity, and I will request changes if needed.\n\n### Prompt Structure:\n- Camera angle → Scene description → Character description → Camera settings\n- Character descriptions must always be separated by commas.\n- All parts of the structure must be separated by commas.\n\n### Notes:\n- At the end of the prompt, you may also include the camera type (if it's not a painting style), such as DSLR, Nikon D, Canon EOS R3, etc.\n- You can specify a lens type (e.g., 14mm focal length, 35mm, fisheye, wide-angle, etc.) if necessary.\n\n### Example Formatting:\n- Highly detailed watercolor painting, majestic lion, intricate fur detail, photograph, natural lighting, brush strokes, watercolor splatters\n- Portrait photo of a red-haired girl standing in water covered with lily pads, long braided hair, Canon EOS R3, volumetric lighting\n- Wide-angle, stunning sunset over a wide open beach, vibrant pink-orange and gold sky, water reflecting sunset colors, mesmerizing effect, lone tall tree in foreground, tree silhouetted against sunset, dramatic feel, Canon EOS R3, landscape scene\n- Watercolor painting, family of elephants roaming the savanna, delicate brush strokes, soft colors, Canon EOS R3, wide-angle lens\n\n### IMPORTANT:\nGenerate the best possible prompt immediately in English, and show only the prompt. Do not write anything else."}
                         ],
@@ -202,6 +202,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                         model=model_id,
                         prompt=prompt,
                         size=size_str,
+                        n=1,
                         response_format="url"
                     )
                 

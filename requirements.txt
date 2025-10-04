@@ -3,7 +3,7 @@ aiosqlite
 aiohttp
 google-genai
 deep_translator
-Pillow
+Pillow-SIMD
 requests
 aiofiles
 beautifulsoup4

@@ -325,7 +325,7 @@ async def get_client(user_id, client_type="g4f_client", model_name=None):
 
 
 enhance_prompt_client = None
-model_name_e = "openai-fast"
+model_name_e = "openai-large"
 
 async def init_enhance_prompt_client():
     

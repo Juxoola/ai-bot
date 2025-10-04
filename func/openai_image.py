@@ -10,7 +10,7 @@ import time
 import base64
 import logging
 import asyncio
-
+from io import BytesIO
 
 async def process_image_with_openai(message: types.Message, state: FSMContext, prompt: str):
     start_time = time.time()
@@ -82,17 +82,24 @@ async def process_custom_image_prompt_openai(message: types.Message, state: FSMC
 async def handle_image_openai(message: types.Message, state: FSMContext):
 
     photo = message.photo[-1]
-    file_info = await bot.get_file(photo.file_id)
-    img_bytes = await bot.download_file(file_info.file_path)
-    img_b64_str = base64.b64encode(img_bytes.getvalue()).decode("utf-8")
 
-    if file_info.file_path.endswith('.jpg'):
+    file_info = await bot.get_file(photo.file_id)
+    img_io = BytesIO()
+    await bot.download_file(file_info.file_path, destination=img_io)
+    image_bytes = img_io.getvalue()
+
+    img_b64_str = await asyncio.to_thread(encode_image_to_base64_sync, image_bytes)
+
+    if file_info.file_path.endswith(('.jpg', '.jpeg')):
         img_type = 'image/jpeg'
     elif file_info.file_path.endswith('.png'):
         img_type = 'image/png'
     else:
-        await message.reply("🔔Неподдерживаемый формат изображения. Пожалуйста, отправьте JPG или PNG.")
+        await message.reply("🔔 Неподдерживаемый формат изображения. Пожалуйста, отправьте JPG или PNG.")
         return
 
     await state.update_data(image_data=img_b64_str, img_type=img_type)
-    await message.reply("🔔Теперь введите текстовый промпт к изображению.")
+    await message.reply("🔔 Теперь введите текстовый промпт к изображению.")
+
+def encode_image_to_base64_sync(image_bytes: bytes) -> str:
+    return base64.b64encode(image_bytes).decode("utf-8")
