@@ -38,11 +38,11 @@ async def process_search_query_handler(message: types.Message, state: FSMContext
         return
         
     try:
-        await set_in_progress(state)
+        await set_in_progress(state, message)
         await process_search_query(message, state)
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
     except Exception as e:
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
         await message.reply(f"🔔Произошла ошибка при выполнении поискового запроса: {e}")
 
 
@@ -68,9 +68,9 @@ async def handle_long_message_handler(message: types.Message, state: FSMContext)
         return
         
     try:
-        await set_in_progress(state)
+        await set_in_progress(state, message)
         await handle_long_message(message, state)
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
     except Exception as e:
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
         await message.reply(f"🔔Произошла ошибка при обработке длинного сообщения: {e}")

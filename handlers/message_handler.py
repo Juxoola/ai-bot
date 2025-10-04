@@ -36,16 +36,16 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
     model_id, api_type = model_key.split('_')
     
     try:
-        await set_in_progress(state)
+        await set_in_progress(state, message)
         
         if message.voice or message.audio:
             if api_type == "poli" and model_id == "openai-audio":
                 await handle_all_messages(message, state, audio_response=True)
-                await clear_in_progress(state)
+                await clear_in_progress(state, message)
                 return
         if message.text and api_type == "poli" and model_id == "openai-audio":
             await handle_all_messages(message, state, audio_response=True)
-            await clear_in_progress(state)
+            await clear_in_progress(state, message)
             return
             
         image_rec_models = await rec_models()
@@ -57,7 +57,7 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
                 await handle_document_with_conversion(message, state)
             else:
                 await message.reply("🚨Обработка файлов не поддерживается данной моделью.")
-            await clear_in_progress(state)
+            await clear_in_progress(state, message)
             return
 
         if message.photo:
@@ -97,7 +97,7 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
                     await message.reply("🚨Распознавание изображений настроено, но обработчик не найден.")
             else:
                 await message.reply("🚨Распознавание изображений не поддерживается этой моделью.")
-            await clear_in_progress(state)
+            await clear_in_progress(state, message)
             return
 
         if current_state == Form.waiting_for_message:
@@ -130,7 +130,7 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         else:
             await handle_all_messages(message, state)
             
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
     except Exception as e:
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
         await message.reply(f"🚨Произошла ошибка: {e}") 

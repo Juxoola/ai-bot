@@ -25,7 +25,7 @@ async def cmd_audio(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
 
     try:
-        await set_in_progress(state)
+        await set_in_progress(state, message)
         
         if current_state == Form.waiting_for_audio:
             await state.set_state(Form.waiting_for_message)
@@ -34,9 +34,9 @@ async def cmd_audio(message: types.Message, state: FSMContext):
             await message.reply("🔔Пожалуйста, отправьте аудиофайл для транскрипции.")
             await state.set_state(Form.waiting_for_audio)
         
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
     except Exception as e:
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
         await message.reply(f"🔔Произошла ошибка: {e}")
 
 @dp.message(Form.waiting_for_audio, lambda message: message.audio or message.voice or message.document and message.document.mime_type.startswith('audio/') or message.video_note)
@@ -49,14 +49,14 @@ async def handle_audio_handler(message: types.Message, state: FSMContext):
         return
     
     try:
-        await set_in_progress(state)
+        await set_in_progress(state, message)
         
         WHISPER_MODELS = await whisp_models()
         await handle_audio(message, state, WHISPER_MODELS)
         
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
     except Exception as e:
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
         await message.reply(f"🔔Произошла ошибка при обработке аудио: {e}")
 
 @dp.callback_query(Form.waiting_for_whisper_model_selection, lambda c: c.data and c.data.startswith("whisper_model_"))
@@ -80,12 +80,12 @@ async def process_whisper_model_selection_handler(callback_query: types.Callback
         return
     
     try:
-        await set_in_progress(state)
         
+        await set_in_progress(state, callback_query.message)
         await process_whisper_model_selection(callback_query, state)
         
-        await clear_in_progress(state)
+        await clear_in_progress(state, callback_query.message)
     except Exception as e:
-        await clear_in_progress(state)
+        await clear_in_progress(state, callback_query.message)
         await callback_query.message.reply(f"🔔Произошла ошибка при выборе модели: {e}")
         await callback_query.answer()

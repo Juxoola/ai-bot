@@ -32,7 +32,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     if not can_proceed:
         return
     
-    await set_in_progress(state)
     
     start_time = time.time()
 
@@ -121,7 +120,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     if enhance:
         try:
             improved_prompt = await config.openai_clients["poli"].chat.completions.create(
-                        model="openai-fast",
+                        model="openai",
                         messages=[
                             {"role": "user", "content": f"You are a text prompt generator for creating images. I will give you a post topic, and you will generate one best-quality prompt and show it to me.\n\n{prompt}\n\nDo not ask for clarifications—just generate the best prompt using your creativity, and I will request changes if needed.\n\n### Prompt Structure:\n- Camera angle → Scene description → Character description → Camera settings\n- Character descriptions must always be separated by commas.\n- All parts of the structure must be separated by commas.\n\n### Notes:\n- At the end of the prompt, you may also include the camera type (if it's not a painting style), such as DSLR, Nikon D, Canon EOS R3, etc.\n- You can specify a lens type (e.g., 14mm focal length, 35mm, fisheye, wide-angle, etc.) if necessary.\n\n### Example Formatting:\n- Highly detailed watercolor painting, majestic lion, intricate fur detail, photograph, natural lighting, brush strokes, watercolor splatters\n- Portrait photo of a red-haired girl standing in water covered with lily pads, long braided hair, Canon EOS R3, volumetric lighting\n- Wide-angle, stunning sunset over a wide open beach, vibrant pink-orange and gold sky, water reflecting sunset colors, mesmerizing effect, lone tall tree in foreground, tree silhouetted against sunset, dramatic feel, Canon EOS R3, landscape scene\n- Watercolor painting, family of elephants roaming the savanna, delicate brush strokes, soft colors, Canon EOS R3, wide-angle lens\n\n### IMPORTANT:\nGenerate the best possible prompt immediately in English, and show only the prompt. Do not write anything else."}
                         ],
@@ -370,18 +369,20 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
                 if enhance:
                     caption += f", enhance: {enhance}"
                 caption += ":"
-                await bot.send_photo(
-                    user_id,
-                    photo=image_url,
-                    caption=caption,
-                    reply_to_message_id=original_message_id
-                )
-                caption2 = "Фото без сжатия"
-                await bot.send_document(
-                    user_id,
-                    document=image_url,
-                    caption=caption2,
-                    reply_to_message_id=original_message_id
+                
+                await asyncio.gather(
+                    bot.send_photo(
+                        user_id,
+                        photo=image_url,
+                        caption=caption,
+                        reply_to_message_id=original_message_id
+                    ),
+                    bot.send_document(
+                        user_id,
+                        document=image_url,
+                        caption="Фото без сжатия",
+                        reply_to_message_id=original_message_id
+                    )
                 )
                 break
             except Exception as e:
@@ -398,7 +399,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
 
     await calculate_and_show_processing_time(message, user_context, start_time)
     
-    await clear_in_progress(state)
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_generation_prompt=None)
     await state.update_data(aspect_ratio=None)
@@ -408,7 +408,6 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
 IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "key")
 
 async def process_image_editing(message: types.Message, state: FSMContext):
-    await set_in_progress(state) 
     
     start_time = time.time()
     user_id = message.from_user.id
@@ -478,24 +477,24 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             else:
                 image_bytes = image_data
 
-            image_url = await upload_to_imgbb_async(image_bytes)
-
-            with Image.open(BytesIO(image_bytes)) as img:
-                width, height = img.size
-                if width * height < 921600:
-                    logging.info(f"Image is too small ({width}x{height}={width*height} pixels). Resizing...")
-                    scale_factor = (921600 / (width * height)) ** 0.5 * 1.01
-                    new_width = int(width * scale_factor)
-                    new_height = int(height * scale_factor)
-
-                    img = img.resize((new_width, new_height), Image.LANCZOS)
-                    logging.info(f"Image resized to {new_width}x{new_height}={new_width*new_height} pixels.")
+            def process_and_resize_image(image_bytes: bytes) -> tuple[bytes, int, int]:
+                with Image.open(BytesIO(image_bytes)) as img:
+                    width, height = img.size
+                    if width * height < 921600:
+                        logging.info(f"Image is too small ({width}x{height}). Resizing...")
+                        scale_factor = (921600 / (width * height)) ** 0.5 * 1.01
+                        new_width = int(width * scale_factor)
+                        new_height = int(height * scale_factor)
+                        img = img.resize((new_width, new_height), Image.LANCZOS)
+                        width, height = new_width, new_height
                     
                     buffer = BytesIO()
                     img.save(buffer, format="JPEG")
-                    image_bytes = buffer.getvalue()
-                    width, height = new_width, new_height
+                    return buffer.getvalue(), width, height
 
+            image_bytes, width, height = await asyncio.to_thread(process_and_resize_image, image_bytes)
+
+            image_url = await upload_to_imgbb_async(image_bytes)
 
             encoded_prompt = quote(instructions)
             base_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
@@ -547,7 +546,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
 
         except Exception as e:
             logging.error(f"Error during Pollinations image editing: {e}")
-            await bot.send_message(user_id, f"🚨 Ошибка при редактировании изображения: {e}", reply_to_message_id=original_message_id)
+            await bot.send_message(user_id, f"🚨 Ошибка при редактировании изображения", reply_to_message_id=original_message_id)
 
     elif api_type == "gemini" and model_id in google_ai_models:
         try:
@@ -639,7 +638,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
                 )
                 await state.set_state(Form.waiting_for_message)
                 return
-            
+
             tasks = [
                 bot.send_photo(
                     user_id,
@@ -658,7 +657,7 @@ async def process_image_editing(message: types.Message, state: FSMContext):
             if text_response:
                 tasks.append(bot.send_message(user_id, text_response, reply_to_message_id=original_message_id))
             
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)            
             
         except Exception as e:
             logging.error(f"Error during image editing: {e}")
@@ -677,7 +676,6 @@ async def process_image_editing(message: types.Message, state: FSMContext):
     
     await calculate_and_show_processing_time(message, user_context, start_time)
     
-    await clear_in_progress(state)
     await state.set_state(Form.waiting_for_message)
     await state.update_data(image_edit_data=None)
     await state.update_data(image_edit_instructions=None)

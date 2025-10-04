@@ -11,10 +11,9 @@ from aiogram.enums import ParseMode
 import time
 from google.genai import types as genai_types
 import re
-import multiprocessing
-import queue
 import base64
 import aiofiles
+import aiofiles.os
 from pydub import AudioSegment
 from func.decorators import rate_limit
 
@@ -214,6 +213,27 @@ async def calculate_and_show_processing_time(message, user_context, start_time):
     logging.info(f"Общее время обработки сообщения: {processing_time:.5f} секунд")
     
     return formatted_processing_time
+
+def process_audio_sync(ogg_bytes: bytes) -> bytes:
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_ogg:
+        temp_ogg.write(ogg_bytes)
+        temp_ogg_path = temp_ogg.name
+
+    temp_mp3_path = temp_ogg_path.replace('.ogg', '.mp3')
+    
+    try:
+        audio = AudioSegment.from_ogg(temp_ogg_path)
+        audio.export(temp_mp3_path, format="mp3")
+        
+        with open(temp_mp3_path, 'rb') as mp3_file:
+            mp3_bytes = mp3_file.read()
+        return mp3_bytes
+    finally:
+        # Очищаем временные файлы
+        if os.path.exists(temp_ogg_path):
+            os.remove(temp_ogg_path)
+        if os.path.exists(temp_mp3_path):
+            os.remove(temp_mp3_path)
 
 async def process_message(message: types.Message, user_context, user_id, api_type, model_id, message_text, start_time=None, audio_data=None, audio_format=None, encoded_audio=None, is_long_message=False):
 
@@ -616,20 +636,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
             if message.voice:
                 audio_format = "ogg"
                 
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_ogg:
-                    temp_ogg.write(audio_bytes)
-                    temp_ogg_path = temp_ogg.name
-                
-                temp_mp3_path = temp_ogg_path.replace('.ogg', '.mp3')
-                audio = AudioSegment.from_ogg(temp_ogg_path)
-                audio.export(temp_mp3_path, format="mp3")
-                
-                with open(temp_mp3_path, 'rb') as mp3_file:
-                    audio_bytes = mp3_file.read()
-                
-                os.remove(temp_ogg_path)
-                os.remove(temp_mp3_path)
-                
+                audio_bytes = await asyncio.to_thread(process_audio_sync, audio_bytes)
                 audio_format = "mp3"
             
             encoded_audio = base64.b64encode(audio_bytes).decode('utf-8')
@@ -679,7 +686,6 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
                     temp_file_path = temp_file.name
 
                 try:
-                    import aiofiles
                     async with aiofiles.open(temp_file_path, "rb") as file_to_send:
                         file_bytes = await file_to_send.read()
                         await message.reply_document(types.BufferedInputFile(file_bytes, filename="response.txt"))
@@ -687,7 +693,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
                     logging.error(f"Ошибка при отправке файла: {e}")
                     await message.answer("🚨 Не удалось отправить ответ в виде файла.")
                 finally:
-                    os.remove(temp_file_path)
+                    await aiofiles.os.remove(temp_file_path)
             else:
                 try:
                     await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
@@ -705,15 +711,14 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
                         temp_file_path = temp_file.name
 
                     try:
-                        import aiofiles
                         async with aiofiles.open(temp_file_path, "rb") as file_to_send:
                             file_bytes = await file_to_send.read()
                             await message.reply_document(types.BufferedInputFile(file_bytes, filename="response.txt"))
-                    except Exception as file_e:
-                        logging.error(f"Ошибка при отправке файла: {file_e}")
+                    except Exception as e:
+                        logging.error(f"Ошибка при отправке файла: {e}")
                         await message.answer("🚨 Не удалось отправить ответ в виде файла.")
                     finally:
-                        os.remove(temp_file_path)
+                        await aiofiles.os.remove(temp_file_path)
 
             await save_context(user_id, user_context)
             
@@ -759,13 +764,14 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
                         temp_file_path = temp_file.name
 
                     try:
-                        with open(temp_file_path, "rb") as file_to_send:
-                            await message.reply_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
+                        async with aiofiles.open(temp_file_path, "rb") as file_to_send:
+                            file_bytes = await file_to_send.read()
+                            await message.reply_document(types.BufferedInputFile(file_bytes, filename="response.txt"))
                     except Exception as e:
                         logging.error(f"Ошибка при отправке файла: {e}")
                         await message.answer("🚨 Не удалось отправить ответ в виде файла.")
                     finally:
-                        os.remove(temp_file_path)
+                        await aiofiles.os.remove(temp_file_path)
                 else:
                     try:
                         await message.reply(response_text, parse_mode=ParseMode.MARKDOWN)
@@ -783,13 +789,14 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
                             temp_file_path = temp_file.name
 
                         try:
-                            with open(temp_file_path, "rb") as file_to_send:
-                                await message.reply_document(types.BufferedInputFile(file_to_send.read(), filename="response.txt"))
-                        except Exception as file_e:
-                            logging.error(f"Ошибка при отправке файла: {file_e}")
+                            async with aiofiles.open(temp_file_path, "rb") as file_to_send:
+                                file_bytes = await file_to_send.read()
+                                await message.reply_document(types.BufferedInputFile(file_bytes, filename="response.txt"))
+                        except Exception as e:
+                            logging.error(f"Ошибка при отправке файла: {e}")
                             await message.answer("🚨 Не удалось отправить ответ в виде файла.")
                         finally:
-                            os.remove(temp_file_path)
+                            await aiofiles.os.remove(temp_file_path)
 
                 if api_type != "gemini":
                     user_context["messages"].append(

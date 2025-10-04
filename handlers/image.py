@@ -61,13 +61,13 @@ async def process_image_generation_prompt_handler(message: types.Message, state:
         return
     
     try:
-        await set_in_progress(state)
+        await set_in_progress(state, message)
         await state.update_data(image_generation_prompt=message.text)
         await state.set_state(Form.waiting_for_message)
         await process_image_generation_prompt(message, state)
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
     except Exception as e:
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
         await message.reply(f"🔔Произошла ошибка при генерации изображения: {e}")
 
 
@@ -82,14 +82,14 @@ async def process_image_edit_instructions_handler(message: types.Message, state:
         return
     
     try:
-        await set_in_progress(state)
+        await set_in_progress(state, message)
         instructions = message.text
         await state.update_data(image_edit_instructions=instructions)
         await state.set_state(Form.waiting_for_message)
         await process_image_editing(message, state)
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
     except Exception as e:
-        await clear_in_progress(state)
+        await clear_in_progress(state, message)
         await message.reply(f"🔔Произошла ошибка при редактировании изображения: {e}")
 
 

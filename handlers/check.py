@@ -28,12 +28,24 @@ async def check_in_progress(message: types.Message, state: FSMContext):
     
     return True
 
-async def set_in_progress(state: FSMContext):
+async def set_in_progress(state: FSMContext, message: types.Message = None):
     current_state = await state.get_state()
     if current_state not in [Form.playing_tictactoe, Form.playing_guess_number]:
         await state.set_state(Form.in_progress)
+        if message:
+            progress_message = await message.answer("⏳")
+            await state.update_data(progress_message_id=progress_message.message_id)
 
-async def clear_in_progress(state: FSMContext):
+async def clear_in_progress(state: FSMContext, message: types.Message = None):
+    data = await state.get_data()
+    progress_message_id = data.get('progress_message_id')
+    if progress_message_id and message:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=progress_message_id)
+        except Exception:
+            pass
+        await state.update_data(progress_message_id=None)
+        
     current_state = await state.get_state()
     special_states = [
         Form.playing_tictactoe, 
