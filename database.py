@@ -516,7 +516,6 @@ async def save_context(user_id, context):
     
     async with get_db_connection() as db:
         async with db.cursor() as cursor:
-            await cursor.execute("BEGIN IMMEDIATE")
             try:
                 context_to_save = context.copy()
                 model_id = context_to_save["model"].split('_')[0]
@@ -532,14 +531,27 @@ async def save_context(user_id, context):
                                           separators=(',', ':'))
                 await cursor.execute(
                     """
-                    UPDATE user_contexts SET
-                        model = ?, messages = ?, api_type = ?, g4f_image_base64 = ?,
-                        long_message = ?, image_generation_model = ?, 
-                        aspect_ratio = ?, enhance = ?, show_processing_time = ?, 
-                        voice = ?, system_role = ?
-                    WHERE user_id = ?
+                    INSERT INTO user_contexts (
+                        user_id, model, messages, api_type, g4f_image_base64,
+                        long_message, image_generation_model, 
+                        aspect_ratio, enhance, show_processing_time, 
+                        voice, system_role
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        model = excluded.model,
+                        messages = excluded.messages,
+                        api_type = excluded.api_type,
+                        g4f_image_base64 = excluded.g4f_image_base64,
+                        long_message = excluded.long_message,
+                        image_generation_model = excluded.image_generation_model,
+                        aspect_ratio = excluded.aspect_ratio,
+                        enhance = excluded.enhance,
+                        show_processing_time = excluded.show_processing_time,
+                        voice = excluded.voice,
+                        system_role = excluded.system_role;
                     """,
                     (
+                        user_id,
                         model_id, 
                         messages_json,
                         context_to_save["api_type"],
@@ -550,8 +562,7 @@ async def save_context(user_id, context):
                         int(context_to_save["enhance"]),
                         int(context_to_save.get("show_processing_time", True)),
                         context_to_save.get("voice", DEFAULT_VOICE),
-                        context_to_save.get("system_role", "default"),
-                        user_id
+                        context_to_save.get("system_role", "default")
                     ),
                 )
                 await db.commit()
@@ -700,25 +711,22 @@ async def initialize_models():
 
 async def update_all_external_models(session: aiohttp.ClientSession):
     logging.info("Starting update of all external models...")
-    tasks = [
-        update_models_from_pollinations(session),
-        update_models_from_openrouter(session),
-        update_models_from_ddc(session),
-        update_models_from_github(session),
-        update_models_from_electronhub(session),
-        update_models_from_airforce(session),
-        update_models_from_mnn(session)
+    update_functions = [
+        update_models_from_pollinations,
+        update_models_from_openrouter,
+        update_models_from_ddc,
+        update_models_from_github,
+        update_models_from_electronhub,
+        update_models_from_airforce,
+        update_models_from_mnn,
     ]
-    
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    task_names = [task.__name__ for task in tasks]
-    for name, result in zip(task_names, results):
-        if isinstance(result, Exception):
-            logging.error(f"Task {name} failed with an exception: {result}")
-        else:
-            logging.info(f"Task {name} completed successfully.")
-    
+    for fn in update_functions:
+        fn_name = fn.__name__
+        try:
+            await fn(session)
+            logging.info(f"Task {fn_name} completed successfully.")
+        except Exception as e:
+            logging.error(f"Task {fn_name} failed with an exception: {e}")
     logging.info("External models update process finished.")
 
 async def update_models_from_pollinations(session: aiohttp.ClientSession):

@@ -32,8 +32,9 @@ async def on_startup(bot: Bot):
 
     await initialize_database()
     logging.info("Database initialized.")
-    logging.info("Scheduling background update of models...")
-    asyncio.create_task(update_all_external_models(config.http_session))
+    logging.info("Updating all external models...")
+    await update_all_external_models(config.http_session)
+    logging.info("External models updated.")
 
 async def on_shutdown(bot: Bot):
     logging.info("Bot is shutting down...")
