@@ -263,10 +263,7 @@ async def process_image_generation_model_handler(callback_query, state):
     model_id, api = model_key.split('_', 1)
     
     user_context = await load_context(user_id)
-    user_context["image_generation_model"] = {
-        "model_id": model_id,
-        "api": api
-    }
+    user_context["image_generation_model"] = f"{model_id}_{api}"
 
     if api == "g4f":
         await update_image_gen_client(user_id, model_id)

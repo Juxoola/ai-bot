@@ -58,18 +58,13 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
     
     model_info = user_context.get("image_generation_model", DEFAULT_IMAGE_GEN_MODEL)
     
-    if isinstance(model_info, dict):
-        model_id = model_info.get("model_id")
-        api_type = model_info.get("api")
+    last_underscore_pos = model_info.rfind('_')
+    if last_underscore_pos != -1:
+        model_id = model_info[:last_underscore_pos]
+        api_type = model_info[last_underscore_pos+1:]
     else:
-  
-        last_underscore_pos = model_info.rfind('_')
-        if last_underscore_pos != -1:
-            model_id = model_info[:last_underscore_pos]
-            api_type = model_info[last_underscore_pos+1:]
-        else:
-            model_id = model_info
-            api_type = "poli" 
+        model_id = model_info
+        api_type = "poli"
     
     aspect_ratio = user_context.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     enhance = user_context.get("enhance", DEFAULT_ENHANCE)
