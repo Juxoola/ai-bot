@@ -19,6 +19,13 @@ IMAGE_GENERATION_MODELS = None
 IMAGE_RECOGNITION_MODELS = None
 WHISPER_MODELS = None
 
+DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
+DEFAULT_MODEL = "openai-large"
+DEFAULT_IMAGE_GEN_MODEL = "flux_poli"
+DEFAULT_WHISPER_MODEL = "whisper-large-v3"
+DEFAULT_ASPECT_RATIO = "1:1"
+DEFAULT_ENHANCE = True
+DEFAULT_VOICE = "alloy"
 
 DEFAULT_MODELS = [
     {"model_id": "gemini-1.5-flash", "model_name": "Gemini-1.5-flash", "api": "gemini"},
@@ -50,7 +57,6 @@ DEFAULT_MODELS = [
     {"model_id": "searchgpt", "model_name": "SearchGPT","api": "poli"},
     {"model_id": "deepseek", "model_name": "DeepSeek-V3","api": "poli"},
     {"model_id": "deepseek-r1", "model_name": "Deepseek-r1","api": "poli"},
-    {"model_id": "deepseek-r1", "model_name": "Deepseek-r1","api": "poli"},
     {"model_id": "google/gemini-2.0-pro-exp-02-05:free", "model_name": "Gemini-2.0-pro-exp-02-05","api": "openrouter"},
     {"model_id": "google/gemini-2.0-flash-thinking-exp:free", "model_name": "Gemini-2.0-flash-thinking-exp","api": "openrouter"},
     {"model_id": "deepseek/deepseek-r1-distill-llama-70b:free", "model_name": "DeepSeek-R1-Distill-70B", "api": "openrouter"},
@@ -64,13 +70,10 @@ DEFAULT_MODELS = [
     {"model_id": "deepseek-v3", "model_name": "DeepSeek-V3", "api": "ddc"},
     {"model_id": "gpt-4o", "model_name": "GPT-4o", "api": "ddc"}
 ]
-
 DEFAULT_IMAGE_GEN_MODELS = [
     {"model_id": "flux", "api": "poli"},
     {"model_id": "turbo", "api": "poli"},
-
 ]
-
 DEFAULT_IMAGE_RECOGNITION_MODELS = [
     {"model_id": "blackboxai", "api": "g4f"},
     {"model_id": "gpt-4o", "api": "g4f"},
@@ -87,35 +90,12 @@ DEFAULT_IMAGE_RECOGNITION_MODELS = [
     {"model_id": "minicpm-2.5", "api": "g4f"},
     {"model_id": "gpt-4o-mini", "api": "g4f"},
     {"model_id": "o1-mini", "api": "g4f"}
-
 ]
-
 DEFAULT_WHISPER_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]
-
-DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
-
-DEFAULT_MODEL = "openai-large"
-DEFAULT_IMAGE_GEN_MODEL = "flux_poli"
-DEFAULT_WHISPER_MODEL = "whisper-large-v3"
-DEFAULT_ASPECT_RATIO = "1:1"
-DEFAULT_ENHANCE = True
-
 AVAILABLE_VOICES = [
-    "alloy",
-    "echo",
-    "fable",
-    "onyx",
-    "nova",
-    "shimmer",
-    "coral",
-    "verse",
-    "ballad",
-    "ash",
-    "sage",
-    "amuch",
-    "dan"
+    "alloy", "echo", "fable", "onyx", "nova", "shimmer",
+    "coral", "verse", "ballad", "ash", "sage", "amuch", "dan"
 ]
-DEFAULT_VOICE = "alloy"
 
 user_context_cache = TTLCache(maxsize=5000, ttl=600)  # 10 минут
 
@@ -128,12 +108,14 @@ class DatabaseConnectionPool:
 
     async def _create_connection(self) -> aiosqlite.Connection:
         conn = await aiosqlite.connect(DATABASE_FILE)
-        await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA synchronous=NORMAL")
-        await conn.execute("PRAGMA cache_size=-4000")  # 4MB cache per connection
-        await conn.execute("PRAGMA temp_store=MEMORY")
-        await conn.execute("PRAGMA mmap_size=30000000000")
-        await conn.execute("PRAGMA busy_timeout=5000") # 5 секунд таймаут при блокировке
+        await conn.executescript("""
+            PRAGMA journal_mode=WAL;
+            PRAGMA synchronous=NORMAL;
+            PRAGMA cache_size=-4000;
+            PRAGMA temp_store=MEMORY;
+            PRAGMA mmap_size=30000000000;
+            PRAGMA busy_timeout=5000;
+        """)
         return conn
 
     async def acquire(self) -> aiosqlite.Connection:
@@ -155,7 +137,6 @@ class DatabaseConnectionPool:
             async with self._lock:
                 self._active_connections -= 1
 
-
     async def close_all(self):
         async with self._lock:
             while not self._pool.empty():
@@ -166,9 +147,7 @@ class DatabaseConnectionPool:
                     logging.error(f"Error closing connection from pool: {e}")
             self._active_connections = 0
 
-
 db_pool = DatabaseConnectionPool(max_connections=50)
-
 
 @asynccontextmanager
 async def get_db_connection():
@@ -179,238 +158,160 @@ async def get_db_connection():
         await db_pool.release(conn)
 
 async def optimize_database():
-
     async with get_db_connection() as db:
         try:
-            await db.execute("PRAGMA optimize")
-            await db.execute("ANALYZE")
-            await db.execute("REINDEX")
-            await db.execute("VACUUM")
+            await db.executescript("""
+                PRAGMA optimize;
+                ANALYZE;
+                REINDEX;
+                VACUUM;
+            """)
             await db.commit()
-            print("Database optimization completed successfully")
+            logging.info("Database optimization completed successfully")
         except Exception as e:
-            print(f"Error during database optimization: {e}")
+            logging.error(f"Error during database optimization: {e}")
             await db.rollback()
 
-async def initialize_database():
-    global ALLOWED_USER_IDS
-    global ADMIN_USER_ID
+async def _setup_database(db):
+    await db.executescript("""
+        PRAGMA journal_mode=WAL;
+        PRAGMA cache_size=-2000;
+        PRAGMA synchronous=NORMAL;
+        PRAGMA temp_store=MEMORY;
+        PRAGMA mmap_size=30000000000;
+    """)
+
+async def _create_tables(db):
+    await db.executescript("""
+        CREATE TABLE IF NOT EXISTS allowed_users (user_id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS admin_users (user_id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS models (
+            model_id TEXT, api TEXT, model_name TEXT,
+            PRIMARY KEY (model_id, api)
+        );
+        CREATE TABLE IF NOT EXISTS image_generation_models (
+            model_id TEXT, api TEXT, PRIMARY KEY (model_id, api)
+        );
+        CREATE TABLE IF NOT EXISTS image_recognition_models (
+            model_id TEXT, api TEXT, PRIMARY KEY (model_id, api)
+        );
+        CREATE TABLE IF NOT EXISTS whisper_models (name TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS user_contexts (
+            user_id INTEGER PRIMARY KEY, model TEXT, messages TEXT, api_type TEXT,
+            g4f_image_base64 TEXT, long_message TEXT, image_generation_model TEXT,
+            aspect_ratio TEXT, enhance INTEGER, show_processing_time INTEGER,
+            voice TEXT DEFAULT 'alloy', system_role TEXT DEFAULT 'default'
+        );
+    """)
+    async with db.execute("PRAGMA table_info(user_contexts)") as cursor:
+        columns = [row[1] for row in await cursor.fetchall()]
+    if "system_role" not in columns:
+        await db.execute("ALTER TABLE user_contexts ADD COLUMN system_role TEXT DEFAULT 'default'")
+    await db.commit()
+
+async def _create_indices(db):
+    await db.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_user_contexts_user_id ON user_contexts (user_id);
+        CREATE INDEX IF NOT EXISTS idx_models_api ON models(api);
+        CREATE INDEX IF NOT EXISTS idx_user_contexts_model ON user_contexts(model);
+        CREATE INDEX IF NOT EXISTS idx_user_contexts_api_type ON user_contexts(api_type);
+        CREATE INDEX IF NOT EXISTS idx_user_contexts_image_generation_model ON user_contexts(image_generation_model);
+    """)
+    await db.commit()
+
+async def _populate_initial_data(db):
+    global ALLOWED_USER_IDS, ADMIN_USER_ID
     global AVAILABLE_MODELS, IMAGE_GENERATION_MODELS, IMAGE_RECOGNITION_MODELS, WHISPER_MODELS
 
-    async with get_db_connection() as db:
-        await db.execute("PRAGMA journal_mode=WAL")
-        
-        await db.execute("PRAGMA cache_size=-2000")  # 2MB cache
-        
-        await db.execute("PRAGMA synchronous=NORMAL")
-        
-        await db.execute("PRAGMA temp_store=MEMORY")
-        
-        await db.execute("PRAGMA mmap_size=30000000000") 
-        
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS allowed_users (
-                user_id INTEGER PRIMARY KEY
-            )
-            """
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS admin_users (
-                user_id INTEGER PRIMARY KEY
-            )
-            """
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS models (
-                model_id TEXT,
-                api TEXT,
-                model_name TEXT,
-                PRIMARY KEY (model_id, api)
-            )
-            """
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS image_generation_models (
-                model_id TEXT,
-                api TEXT,
-                PRIMARY KEY (model_id, api)
-            )
-            """
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS image_recognition_models (
-                model_id TEXT,
-                api TEXT,
-                PRIMARY KEY (model_id, api)
-            )
-            """
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS whisper_models (
-                name TEXT PRIMARY KEY
-            )
-            """
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_contexts (
-                user_id INTEGER PRIMARY KEY,
-                model TEXT,
-                messages TEXT,
-                api_type TEXT,
-                g4f_image_base64 TEXT,
-                long_message TEXT,
-                image_generation_model TEXT,
-                aspect_ratio TEXT,
-                enhance INTEGER,
-                show_processing_time INTEGER,
-                voice TEXT DEFAULT 'alloy',
-                system_role TEXT DEFAULT 'default'
-            )
-            """
-        )
-        async with db.execute("PRAGMA table_info(user_contexts)") as cursor:
-            columns = [row[1] for row in await cursor.fetchall()]
-
-        if "system_role" not in columns:
-            await db.execute("ALTER TABLE user_contexts ADD COLUMN system_role TEXT DEFAULT 'default'")
-
-        await db.commit()
-
-        async with db.execute("SELECT COUNT(*) FROM allowed_users") as cursor:
-            row = await cursor.fetchone()
-            allowed_users_count = row[0]
-
-        if allowed_users_count == 0:
+    async with db.execute("SELECT COUNT(*) FROM allowed_users") as cursor:
+        if (await cursor.fetchone())[0] == 0:
             await db.executemany("INSERT INTO allowed_users (user_id) VALUES (?)", [(user_id,) for user_id in ALLOWED_USER_IDS])
-            await db.commit()
+    
+    async with db.execute("SELECT user_id FROM allowed_users") as cursor:
+        ALLOWED_USER_IDS = [row[0] for row in await cursor.fetchall()]
 
-        async with db.execute("SELECT user_id FROM allowed_users") as cursor:
-            rows = await cursor.fetchall()
-            ALLOWED_USER_IDS = [row[0] for row in rows]
-
-        async with db.execute("SELECT COUNT(*) FROM admin_users") as cursor:
-            row = await cursor.fetchone()
-            admin_users_count = row[0]
-
-        if admin_users_count == 0:
+    async with db.execute("SELECT COUNT(*) FROM admin_users") as cursor:
+        if (await cursor.fetchone())[0] == 0:
             await db.execute("INSERT INTO admin_users (user_id) VALUES (?)", (ADMIN_USER_ID,))
-            await db.commit()
 
-        async with db.execute("SELECT user_id FROM admin_users") as cursor:
-            rows = await cursor.fetchall()
-            ADMIN_USER_ID = rows[0][0] if rows else None
+    async with db.execute("SELECT user_id FROM admin_users") as cursor:
+        rows = await cursor.fetchall()
+        ADMIN_USER_ID = rows[0][0] if rows else None
 
-        async with db.execute("SELECT model_id, model_name, api FROM models") as cursor:
-            rows = await cursor.fetchall()
-            loaded_models = {f"{row[0]}_{row[2]}": {"model_name": row[1], "api": row[2]} for row in rows}
+    async with db.execute("SELECT model_id, model_name, api FROM models") as cursor:
+        rows = await cursor.fetchall()
+        loaded_models = {f"{row[0]}_{row[2]}": {"model_name": row[1], "api": row[2]} for row in rows}
+    if not loaded_models:
+        await db.executemany("INSERT INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
+                             [(m["model_id"], m["model_name"], m["api"]) for m in DEFAULT_MODELS])
+        loaded_models = {f"{m['model_id']}_{m['api']}": {"model_name": m["model_name"], "api": m["api"]} for m in DEFAULT_MODELS}
 
-        if not loaded_models:
-            await db.executemany(
-                "INSERT INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
-                [(model["model_id"], model["model_name"], model["api"]) for model in DEFAULT_MODELS]
-            )
-            await db.commit()
-            loaded_models = {
-                f"{model['model_id']}_{model['api']}": {
-                    "model_name": model["model_name"], 
-                    "api": model["api"]
-                } for model in DEFAULT_MODELS
-            }
+    async with db.execute("SELECT model_id, api FROM image_generation_models") as cursor:
+        loaded_image_gen_models = [{"model_id": row[0], "api": row[1]} for row in await cursor.fetchall()]
+    if not loaded_image_gen_models:
+        await db.executemany("INSERT INTO image_generation_models (model_id, api) VALUES (?, ?)",
+                             [(m["model_id"], m["api"]) for m in DEFAULT_IMAGE_GEN_MODELS])
+        loaded_image_gen_models = DEFAULT_IMAGE_GEN_MODELS
 
-        async with db.execute("SELECT model_id, api FROM image_generation_models") as cursor:
-            rows = await cursor.fetchall()
-            loaded_image_gen_models = [{"model_id": row[0], "api": row[1]} for row in rows]
+    async with db.execute("SELECT model_id, api FROM image_recognition_models") as cursor:
+        loaded_image_rec_models = [{"model_id": row[0], "api": row[1]} for row in await cursor.fetchall()]
+    if not loaded_image_rec_models:
+        await db.executemany("INSERT INTO image_recognition_models (model_id, api) VALUES (?, ?)",
+                             [(m["model_id"], m["api"]) for m in DEFAULT_IMAGE_RECOGNITION_MODELS])
+        loaded_image_rec_models = DEFAULT_IMAGE_RECOGNITION_MODELS
 
-        if not loaded_image_gen_models:
-            await db.executemany(
-                "INSERT INTO image_generation_models (model_id, api) VALUES (?, ?)",
-                [(model["model_id"], model["api"]) for model in DEFAULT_IMAGE_GEN_MODELS]
-            )
-            await db.commit()
-            loaded_image_gen_models = DEFAULT_IMAGE_GEN_MODELS
+    async with db.execute("SELECT name FROM whisper_models") as cursor:
+        loaded_whisper_models = [row[0] for row in await cursor.fetchall()]
+    if not loaded_whisper_models:
+        await db.executemany("INSERT INTO whisper_models (name) VALUES (?)",
+                             [(name,) for name in DEFAULT_WHISPER_MODELS])
+        loaded_whisper_models = DEFAULT_WHISPER_MODELS
+    
+    await db.commit()
 
-        async with db.execute("SELECT model_id, api FROM image_recognition_models") as cursor:
-            rows = await cursor.fetchall()
-            loaded_image_rec_models = [{"model_id": row[0], "api": row[1]} for row in rows]
+    AVAILABLE_MODELS = loaded_models
+    IMAGE_GENERATION_MODELS = loaded_image_gen_models
+    IMAGE_RECOGNITION_MODELS = loaded_image_rec_models
+    WHISPER_MODELS = loaded_whisper_models
 
-        if not loaded_image_rec_models:
-            await db.executemany(
-                "INSERT INTO image_recognition_models (model_id, api) VALUES (?, ?)",
-                [(model["model_id"], model["api"]) for model in DEFAULT_IMAGE_RECOGNITION_MODELS]
-            )
-            await db.commit()
-            loaded_image_rec_models = DEFAULT_IMAGE_RECOGNITION_MODELS
-
-        async with db.execute("SELECT name FROM whisper_models") as cursor:
-            rows = await cursor.fetchall()
-            loaded_whisper_models = [row[0] for row in rows]
-
-        if not loaded_whisper_models:
-            await db.executemany("INSERT INTO whisper_models (name) VALUES (?)",
-                                 [(model_name,) for model_name in DEFAULT_WHISPER_MODELS])
-            await db.commit()
-            loaded_whisper_models = DEFAULT_WHISPER_MODELS
-
-        AVAILABLE_MODELS = loaded_models
-        IMAGE_GENERATION_MODELS = loaded_image_gen_models
-        IMAGE_RECOGNITION_MODELS = loaded_image_rec_models
-        WHISPER_MODELS = loaded_whisper_models
- 
-
+async def initialize_database():
+    async with get_db_connection() as db:
+        await _setup_database(db)
+        await _create_tables(db)
+        await _populate_initial_data(db)
         await initialize_models()
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_user_contexts_user_id ON user_contexts (user_id)")
-
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_models_api ON models(api)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_user_contexts_model ON user_contexts(model)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_user_contexts_api_type ON user_contexts(api_type)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_user_contexts_image_generation_model ON user_contexts(image_generation_model)")
-
+        await _create_indices(db)
         await optimize_database()
 
 async def clear_all_user_contexts():
     async with get_db_connection() as db:
-        user_data = []
-        async with db.execute("SELECT user_id, api_type, system_role FROM user_contexts") as cursor:
-            async for row in cursor:
-                user_data.append({
-                    "user_id": row[0],
-                    "api_type": row[1],
-                    "system_role": row[2] or "default"
-                })
+        cursor = await db.execute("SELECT user_id, api_type, system_role FROM user_contexts")
+        user_data = await cursor.fetchall()
         
         if not user_data:
             return
 
         update_params = []
-        for user in user_data:
-            system_prompt = DEFAULT_SYSTEM_PROMPTS.get(user["system_role"], DEFAULT_SYSTEM_PROMPTS["default"])
+        for user_id, api_type, system_role in user_data:
+            system_role = system_role or "default"
+            system_prompt = DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"])
             
-            if user["api_type"] == "gemini":
+            if api_type == "gemini":
                 messages = json.dumps([{"role": "system", "parts": [{"text": system_prompt}]}])
             else:
                 messages = json.dumps([{"role": "system", "content": system_prompt}])
             
-            update_params.append((messages, user["user_id"]))
+            update_params.append((messages, user_id))
         
         await db.executemany(
             """
             UPDATE user_contexts
-            SET messages = ?,
-                long_message = '',
-                g4f_image_base64 = NULL
+            SET messages = ?, long_message = '', g4f_image_base64 = NULL
             WHERE user_id = ?
             """,
             update_params
         )
         await db.commit()
-        
         user_context_cache.clear()
 
 async def reset_user_context(user_id):
@@ -444,70 +345,62 @@ async def reset_user_context(user_id):
     if cache_key in user_context_cache:
         del user_context_cache[cache_key]
         
+async def _create_default_context(db, user_id):
+    async with db.execute("SELECT model_id, api FROM models WHERE model_id = ?", (DEFAULT_MODEL,)) as cursor:
+        model_row = await cursor.fetchone()
+    model_id = model_row[0] if model_row else DEFAULT_MODEL
+    api_type = model_row[1] if model_row else AVAILABLE_MODELS[f"{DEFAULT_MODEL}_poli"]["api"]
+
+    if api_type == "gemini":
+        system_message = [{"role": "system", "parts": [{"text": DEFAULT_SYSTEM_PROMPTS["default"]}]}]
+    else:
+        system_message = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPTS["default"]}]
+
+    context = {
+        "model": f"{model_id}_{api_type}", "messages": system_message, "api_type": api_type,
+        "g4f_image": None, "long_message": "", "image_generation_model": DEFAULT_IMAGE_GEN_MODEL,
+        "aspect_ratio": DEFAULT_ASPECT_RATIO, "enhance": True, "show_processing_time": False,
+        "voice": DEFAULT_VOICE, "system_role": "default"
+    }
+    await save_context(user_id, context)
+
+    if api_type == "g4f":
+        from config import update_user_clients, update_image_gen_client
+        model_key = context["model"].split('_')[0]
+        update_user_clients(user_id, model_key)
+        image_gen_model_id = context["image_generation_model"].split('_')[0]
+        await update_image_gen_client(user_id, image_gen_model_id)
+        
+    return context
+
 async def load_context(user_id):
     cache_key = f"context_{user_id}"
-    if cache_key in user_context_cache:
-        return user_context_cache[cache_key]
-    
-    async with get_db_connection() as db:
-        async with db.execute(
-            "SELECT model, messages, api_type, g4f_image_base64, long_message, image_generation_model, aspect_ratio, enhance, show_processing_time, voice, system_role FROM user_contexts WHERE user_id = ?",
-            (user_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                context = {
-                    "model": f"{row[0]}_{row[2]}",
-                    "messages": json.loads(row[1]),
-                    "api_type": row[2],
-                    "g4f_image": BytesIO(base64.b64decode(row[3])) if row[3] else None,
-                    "long_message": row[4],
-                    "image_generation_model": row[5],
-                    "aspect_ratio": row[6],
-                    "enhance": bool(row[7]),
-                    "show_processing_time": bool(row[8]),
-                    "voice": row[9] if row[9] else DEFAULT_VOICE,
-                    "system_role": row[10] if row[10] else "default"
-                }
-                user_context_cache[cache_key] = context
-                return context
-            else:
-                allowed_apis = list(openai_clients.keys()) + ["g4f"]
-                async with db.execute("SELECT model_id, api FROM models WHERE model_id = ?", (DEFAULT_MODEL,)) as cursor:
-                    model_row = await cursor.fetchone()
-                    model_id = model_row[0] if model_row else DEFAULT_MODEL
-                    api_type = model_row[1] if model_row else AVAILABLE_MODELS[f"{DEFAULT_MODEL}_poli"]["api"]
+    if cached_context := user_context_cache.get(cache_key):
+        return cached_context
 
-                if api_type == "gemini":
-                    system_message = [{"role": "system", "parts": [{"text": DEFAULT_SYSTEM_PROMPTS["default"]}]}]
-                elif api_type in allowed_apis:
-                    system_message = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPTS["default"]}]
-               
-                context = {
-                    "model": f"{model_id}_{api_type}", 
-                    "messages": system_message,
-                    "api_type": api_type,
-                    "g4f_image": None,
-                    "long_message": "",
-                    "image_generation_model": DEFAULT_IMAGE_GEN_MODEL,
-                    "aspect_ratio": DEFAULT_ASPECT_RATIO,
-                    "enhance": True,
-                    "show_processing_time": False,
-                    "voice": DEFAULT_VOICE,
-                    "system_role": "default"
-                }
-                await save_context(user_id, context)
-                
-                if api_type == "g4f":
-                    from config import update_user_clients, update_image_gen_client
-                    model_key = context["model"].split('_')[0]
-                    update_user_clients(user_id, model_key)
-                    
-                    image_gen_model_id = context["image_generation_model"].split('_')[0]
-                    await update_image_gen_client(user_id, image_gen_model_id)
-                    
-                user_context_cache[cache_key] = context
-                return context
+    async with get_db_connection() as db:
+        cursor = await db.execute(
+            "SELECT model, messages, api_type, g4f_image_base64, long_message, "
+            "image_generation_model, aspect_ratio, enhance, show_processing_time, "
+            "voice, system_role FROM user_contexts WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+
+    if row:
+        context = {
+            "model": f"{row[0]}_{row[2]}", "messages": json.loads(row[1]), "api_type": row[2],
+            "g4f_image": BytesIO(base64.b64decode(row[3])) if row[3] else None,
+            "long_message": row[4], "image_generation_model": row[5], "aspect_ratio": row[6],
+            "enhance": bool(row[7]), "show_processing_time": bool(row[8]),
+            "voice": row[9] or DEFAULT_VOICE, "system_role": row[10] or "default"
+        }
+    else:
+        async with get_db_connection() as db:
+            context = await _create_default_context(db, user_id)
+
+    user_context_cache[cache_key] = context
+    return context
 
 async def save_context(user_id, context):
     cache_key = f"context_{user_id}"
@@ -574,128 +467,60 @@ async def save_context(user_id, context):
                 logging.error(f"Error saving context for user {user_id}: {e}")
                 raise e
 
-async def load_models():
+async def _load_data(query, default_data):
     try:
         async with get_db_connection() as db:
-            models = {}
-            async with db.execute("SELECT model_id, model_name, api FROM models") as cursor:
-                async for row in cursor:
-                    unique_key = f"{row[0]}_{row[2]}"
-                    models[unique_key] = {"model_name": row[1], "api": row[2]}
-            return models
+            cursor = await db.execute(query)
+            return await cursor.fetchall()
     except Exception as e:
-        print(f"Error loading models: {e}")
-        return {
-            f"{model['model_id']}_{model['api']}": {
-                "model_name": model["model_name"], 
-                "api": model["api"]
-            } for model in DEFAULT_MODELS
-        }
+        logging.error(f"Error loading data: {e}")
+        return default_data
 
+async def load_models():
+    rows = await _load_data("SELECT model_id, model_name, api FROM models", [])
+    if not rows:
+        return {f"{m['model_id']}_{m['api']}": {"model_name": m["model_name"], "api": m["api"]} for m in DEFAULT_MODELS}
+    return {f"{row[0]}_{row[2]}": {"model_name": row[1], "api": row[2]} for row in rows}
 
 async def load_image_generation_models():
-    try:
-        async with get_db_connection() as db:
-            models = []
-            async with db.execute("SELECT model_id, api FROM image_generation_models") as cursor:
-                async for row in cursor:
-                    models.append({"model_id": row[0], "api": row[1]})
-            return models
-    except Exception as e:
-        print(f"Error loading image generation models: {e}")
-        return DEFAULT_IMAGE_GEN_MODELS
+    rows = await _load_data("SELECT model_id, api FROM image_generation_models", [])
+    return [{"model_id": row[0], "api": row[1]} for row in rows] or DEFAULT_IMAGE_GEN_MODELS
 
 async def load_image_recognition_models():
-    try:
-        async with get_db_connection() as db:
-            models = []
-            async with db.execute("SELECT model_id, api FROM image_recognition_models") as cursor:
-                async for row in cursor:
-                    models.append({"model_id": row[0], "api": row[1]})
-            return models
-    except Exception as e:
-        print(f"Error loading image recognition models: {e}")
-        return DEFAULT_IMAGE_RECOGNITION_MODELS
+    rows = await _load_data("SELECT model_id, api FROM image_recognition_models", [])
+    return [{"model_id": row[0], "api": row[1]} for row in rows] or DEFAULT_IMAGE_RECOGNITION_MODELS
 
 async def load_whisper_models():
-    try:
-        async with get_db_connection() as db:
-            models = []
-            async with db.execute("SELECT name FROM whisper_models") as cursor:
-                async for row in cursor:
-                    models.append(row[0])
-            return models
-    except Exception as e:
-        print(f"Error loading whisper models: {e}")
-        return DEFAULT_WHISPER_MODELS
+    rows = await _load_data("SELECT name FROM whisper_models", [])
+    return [row[0] for row in rows] or DEFAULT_WHISPER_MODELS
+
+async def _save_data(table_name, columns, data):
+    async with get_db_connection() as db:
+        try:
+            await db.execute(f"DELETE FROM {table_name}")
+            placeholders = ", ".join("?" * len(columns))
+            await db.executemany(f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})", data)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            logging.error(f"Error saving data to {table_name}: {e}")
+            raise
 
 async def save_models(models):
-    async with get_db_connection() as db:
-        async with db.cursor() as cursor:
-            await cursor.execute("BEGIN")
-            try:
-                await cursor.execute("DELETE FROM models")
-                insert_data = [
-                    (key.split("_")[0], data["model_name"], data["api"])
-                    for key, data in models.items()
-                ]
-                await cursor.executemany(
-                    "INSERT INTO models (model_id, model_name, api) VALUES (?, ?, ?)",
-                    insert_data
-                )
-                await db.commit()
-            except Exception as e:
-                await db.rollback()
-                print(f"Error saving models: {e}")
+    data = [(key.split("_")[0], value["model_name"], value["api"]) for key, value in models.items()]
+    await _save_data("models", ("model_id", "model_name", "api"), data)
 
 async def save_image_generation_models(models):
-    async with get_db_connection() as db:
-        async with db.cursor() as cursor:
-            await cursor.execute("BEGIN")
-            try:
-                await cursor.execute("DELETE FROM image_generation_models")
-                insert_data = [
-                    (model["model_id"], model["api"])
-                    for model in models
-                ]
-                await cursor.executemany(
-                    "INSERT INTO image_generation_models (model_id, api) VALUES (?, ?)",
-                    insert_data
-                )
-                await db.commit()
-            except Exception as e:
-                await db.rollback()
-                raise e
+    data = [(model["model_id"], model["api"]) for model in models]
+    await _save_data("image_generation_models", ("model_id", "api"), data)
 
 async def save_image_recognition_models(models):
-    async with get_db_connection() as db:
-        async with db.cursor() as cursor:
-            await cursor.execute("BEGIN")
-            try:
-                await cursor.execute("DELETE FROM image_recognition_models")
-                await cursor.executemany(
-                    "INSERT INTO image_recognition_models (model_id, api) VALUES (?, ?)",
-                    [(model["model_id"], model["api"]) for model in models],
-                )
-                await db.commit()
-            except Exception as e:
-                await db.rollback()
-                print(f"Error saving image recognition models: {e}")
+    data = [(model["model_id"], model["api"]) for model in models]
+    await _save_data("image_recognition_models", ("model_id", "api"), data)
 
 async def save_whisper_models(models):
-    async with get_db_connection() as db:
-        async with db.cursor() as cursor:
-            await cursor.execute("BEGIN")
-            try:
-                await cursor.execute("DELETE FROM whisper_models")
-                await cursor.executemany(
-                    "INSERT INTO whisper_models (name) VALUES (?)",
-                    [(model_name,) for model_name in models],
-                )
-                await db.commit()
-            except Exception as e:
-                await db.rollback()
-                print(f"Error saving whisper models: {e}")
+    data = [(model_name,) for model_name in models]
+    await _save_data("whisper_models", ("name",), data)
 
 AVAILABLE_MODELS = None
 IMAGE_GENERATION_MODELS = None
@@ -709,285 +534,124 @@ async def initialize_models():
     IMAGE_RECOGNITION_MODELS = await load_image_recognition_models()
     WHISPER_MODELS = await load_whisper_models()
 
+async def _update_models_from_source(session: aiohttp.ClientSession, config: dict):
+    api_name = config["api_name"]
+    url = config["url"]
+    headers = config.get("headers", {})
+    
+    if config.get("requires_token"):
+        token = providers_config.get(api_name, {}).get("api_key")
+        if not token:
+            logging.warning(f"API ключ для '{api_name}' не найден. Обновление пропущено.")
+            return
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        async with session.get(url, headers=headers) as response:
+            if response.status != 200:
+                logging.error(f"Ошибка при получении моделей от {api_name.capitalize()}: HTTP {response.status}")
+                return
+            models_data = await response.json()
+
+        new_models = []
+        new_image_rec_models = []
+        
+        items = config["items_path"](models_data)
+        for item in items:
+            if not config["filter"](item):
+                continue
+
+            model_id = config["id_path"](item)
+            if not model_id:
+                continue
+            
+            model_name = config["name_path"](item)
+            new_models.append((model_id, model_name, api_name))
+
+            if config.get("vision_path") and config["vision_path"](item):
+                new_image_rec_models.append((model_id, api_name))
+
+        async with get_db_connection() as db:
+            await db.execute("DELETE FROM models WHERE api = ?", (api_name,))
+            if config.get("vision_path"):
+                await db.execute("DELETE FROM image_recognition_models WHERE api = ?", (api_name,))
+            
+            if new_models:
+                await db.executemany("INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)", new_models)
+            if new_image_rec_models:
+                await db.executemany("INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)", new_image_rec_models)
+            
+            await db.commit()
+            logging.info(f"Модели от {api_name.capitalize()} успешно обновлены.")
+
+    except Exception as e:
+        logging.error(f"Критическая ошибка при обновлении моделей от {api_name.capitalize()}: {e}", exc_info=True)
+        async with get_db_connection() as db:
+            await db.rollback()
+
+MODEL_SOURCES_CONFIG = {
+    "pollinations": {
+        "api_name": "poli", "url": "https://text.pollinations.ai/models",
+        "items_path": lambda data: data,
+        "filter": lambda item: item.get("tier") in ["seed", "anonymous"],
+        "id_path": lambda item: item.get("name"),
+        "name_path": lambda item: item.get("description", item.get("name")),
+        "vision_path": lambda item: item.get("vision"),
+    },
+    "openrouter": {
+        "api_name": "openrouter", "url": "https://openrouter.ai/api/v1/models",
+        "items_path": lambda data: data.get("data", []),
+        "filter": lambda item: "free" in item.get("id", ""),
+        "id_path": lambda item: item.get("id"),
+        "name_path": lambda item: item.get("name"),
+        "vision_path": lambda item: "image" in item.get("architecture", {}).get("input_modalities", []),
+    },
+    "ddc": {
+        "api_name": "ddc", "url": "https://api.a4f.co/v1/models",
+        "items_path": lambda data: data.get("data", []),
+        "filter": lambda item: item.get("type") == "chat/completion",
+        "id_path": lambda item: item.get("id"),
+        "name_path": lambda item: item.get("id"),
+        "vision_path": lambda item: "vision" in item.get("features", []),
+    },
+    "github": {
+        "api_name": "github", "url": "https://models.github.ai/v1/models", "requires_token": True,
+        "items_path": lambda data: data.get("data", []),
+        "filter": lambda item: True,
+        "id_path": lambda item: item.get("id"),
+        "name_path": lambda item: item.get("name"),
+        "vision_path": lambda item: "image" in item.get("supported_input_modalities", []),
+    },
+    "electronhub": {
+        "api_name": "electronhub", "url": "https://api.electronhub.ai/v1/models",
+        "items_path": lambda data: data.get("data", []),
+        "filter": lambda item: ":free" in item.get("id", ""),
+        "id_path": lambda item: item.get("id"),
+        "name_path": lambda item: item.get("name"),
+        "vision_path": lambda item: item.get("metadata", {}).get("vision"),
+    },
+    "airforce": {
+        "api_name": "airforce", "url": "https://api.airforce/v1/models",
+        "items_path": lambda data: data.get("data", []),
+        "filter": lambda item: item.get("supports_chat"),
+        "id_path": lambda item: item.get("id"),
+        "name_path": lambda item: item.get("id"),
+    },
+    "mnn": {
+        "api_name": "mnn", "url": "https://api.mnnai.ru/v1/models",
+        "items_path": lambda data: data.get("data", []),
+        "filter": lambda item: item.get("type") == "chat.completions",
+        "id_path": lambda item: item.get("id"),
+        "name_path": lambda item: item.get("id"),
+        "vision_path": lambda item: item.get("vision"),
+    },
+}
+
 async def update_all_external_models(session: aiohttp.ClientSession):
     logging.info("Starting update of all external models...")
-    update_functions = [
-        update_models_from_pollinations,
-        update_models_from_openrouter,
-        update_models_from_ddc,
-        update_models_from_github,
-        update_models_from_electronhub,
-        update_models_from_airforce,
-        update_models_from_mnn,
-    ]
-    for fn in update_functions:
-        fn_name = fn.__name__
-        try:
-            await fn(session)
-            logging.info(f"Task {fn_name} completed successfully.")
-        except Exception as e:
-            logging.error(f"Task {fn_name} failed with an exception: {e}")
+    tasks = [_update_models_from_source(session, config) for config in MODEL_SOURCES_CONFIG.values()]
+    await asyncio.gather(*tasks)
     logging.info("External models update process finished.")
-
-async def update_models_from_pollinations(session: aiohttp.ClientSession):
-    async with get_db_connection() as db:
-        try:
-            await db.execute("DELETE FROM models WHERE api = 'poli'")
-            await db.execute("DELETE FROM image_recognition_models WHERE api = 'poli'")
-
-            url = "https://text.pollinations.ai/models"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    models_data = await response.json()
-                    
-                    new_models = []
-                    new_image_recognition_models = []
-                    
-                    for model_info in models_data:
-                        if model_info.get("tier") in ["seed", "anonymous"]:
-                            model_id = model_info.get("name")
-                            if not model_id: continue
-                            
-                            model_name = model_info.get("description", model_id)
-                            api = "poli"
-                            
-                            # Добавляем в общий список моделей
-                            new_models.append((model_id, model_name, api))
-
-                            # Если модель поддерживает распознавание изображений
-                            if model_info.get("vision"):
-                                new_image_recognition_models.append((model_id, api))
-                    
-                    if new_models:
-                        await db.executemany("INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)", new_models)
-                    if new_image_recognition_models:
-                        await db.executemany("INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)", new_image_recognition_models)
-                        
-                    await db.commit()
-                    logging.info("Модели от Pollinations успешно обновлены.")
-                else:
-                    logging.error(f"Ошибка при получении моделей от Pollinations: HTTP {response.status}")
-        except Exception as e:
-            logging.error(f"Критическая ошибка при обновлении моделей от Pollinations: {e}", exc_info=True)
-            await db.rollback()
-
-async def update_models_from_openrouter(session: aiohttp.ClientSession):
-    async with get_db_connection() as db:
-        try:
-            await db.execute("DELETE FROM models WHERE api = 'openrouter'")
-            await db.execute("DELETE FROM image_recognition_models WHERE api = 'openrouter'")
-
-            url = "https://openrouter.ai/api/v1/models"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    models_data = await response.json()
-                    
-                    new_models = []
-                    new_image_recognition_models = []
-                    
-                    for model_info in models_data.get("data", []):
-                        model_id = model_info.get("id")
-                        if model_id and "free" in model_id:
-                            model_name = model_info.get("name", model_id)
-                            api = "openrouter"
-                            
-                            new_models.append((model_id, model_name, api))
-
-                            if "image" in model_info.get("architecture", {}).get("input_modalities", []):
-                                new_image_recognition_models.append((model_id, api))
-
-                    if new_models:
-                        await db.executemany("INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)", new_models)
-                    if new_image_recognition_models:
-                        await db.executemany("INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)", new_image_recognition_models)
-                        
-                    await db.commit()
-                    logging.info("Модели от OpenRouter успешно обновлены.")
-                else:
-                    logging.error(f"Ошибка при получении моделей от OpenRouter: HTTP {response.status}")
-        except Exception as e:
-            logging.error(f"Критическая ошибка при обновлении моделей от OpenRouter: {e}", exc_info=True)
-            await db.rollback()
-
-async def update_models_from_ddc(session: aiohttp.ClientSession):
-    async with get_db_connection() as db:
-        try:
-            await db.execute("DELETE FROM models WHERE api = 'ddc'")
-            await db.execute("DELETE FROM image_recognition_models WHERE api = 'ddc'")
-
-            url = "https://api.a4f.co/v1/models"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    models_data = await response.json()
-                    new_models = []
-                    new_image_recognition_models = []
-                    
-                    for model_info in models_data.get("data", []):
-                        if model_info.get("type") == "chat/completion":
-                            model_id = model_info.get("id")
-                            if not model_id: continue
-                            
-                            api = "ddc"
-                            new_models.append((model_id, model_id, api))
-
-                            if "vision" in model_info.get("features", []):
-                                new_image_recognition_models.append((model_id, api))
-                    
-                    if new_models:
-                        await db.executemany("INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)", new_models)
-                    if new_image_recognition_models:
-                        await db.executemany("INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)", new_image_recognition_models)
-
-                    await db.commit()
-                    logging.info("Модели от DDC успешно обновлены.")
-                else:
-                    logging.error(f"Ошибка при получении моделей от {url}: HTTP {response.status}")
-        except Exception as e:
-            logging.error(f"Критическая ошибка при обновлении моделей от DDC: {e}", exc_info=True)
-            await db.rollback()
-
-async def update_models_from_github(session: aiohttp.ClientSession):
-    provider = "github"
-    token = providers_config.get(provider, {}).get("api_key")
-    if not token:
-        logging.warning(f"API ключ для '{provider}' не найден в конфигурации. Обновление пропущено.")
-        return
-
-    async with get_db_connection() as db:
-        try:
-            await db.execute("DELETE FROM models WHERE api = ?", (provider,))
-            await db.execute("DELETE FROM image_recognition_models WHERE api = ?", (provider,))
-
-            url = "https://models.github.ai/v1/models"
-            headers = {"Authorization": f"Bearer {token}"}
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    models_data = await response.json()
-                    new_models = []
-                    new_image_recognition_models = []
-                    
-                    for model_info in models_data.get("data", []):
-                        model_id = model_info.get("id")
-                        if not model_id: continue
-
-                        model_name = model_info.get("name", model_id)
-                        new_models.append((model_id, model_name, provider))
-
-                        if "image" in model_info.get("supported_input_modalities", []):
-                            new_image_recognition_models.append((model_id, provider))
-
-                    if new_models:
-                        await db.executemany("INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)", new_models)
-                    if new_image_recognition_models:
-                        await db.executemany("INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)", new_image_recognition_models)
-                    
-                    await db.commit()
-                    logging.info("Модели от GitHub успешно обновлены.")
-                else:
-                    logging.error(f"Ошибка при получении моделей от GitHub: HTTP {response.status}")
-        except Exception as e:
-            logging.error(f"Критическая ошибка при обновлении моделей от GitHub: {e}", exc_info=True)
-            await db.rollback()
-
-async def update_models_from_electronhub(session: aiohttp.ClientSession):
-    api_name = "electronhub"
-    async with get_db_connection() as db:
-        try:
-            await db.execute("DELETE FROM models WHERE api = ?", (api_name,))
-            await db.execute("DELETE FROM image_recognition_models WHERE api = ?", (api_name,))
-
-            url = "https://api.electronhub.ai/v1/models"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    models_data = await response.json()
-                    new_models = []
-                    new_image_recognition_models = []
-                    
-                    for model_info in models_data.get("data", []):
-                        model_id = model_info.get("id")
-                        if model_id and ":free" in model_id:
-                            model_name = model_info.get("name", model_id)
-                            new_models.append((model_id, model_name, api_name))
-                            
-                            if model_info.get("metadata", {}).get("vision"):
-                                new_image_recognition_models.append((model_id, api_name))
-
-                    if new_models:
-                        await db.executemany("INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)", new_models)
-                    if new_image_recognition_models:
-                        await db.executemany("INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)", new_image_recognition_models)
-                        
-                    await db.commit()
-                    logging.info(f"Модели от {api_name.capitalize()} успешно обновлены.")
-                else:
-                    logging.error(f"Ошибка при получении моделей от {api_name.capitalize()}: HTTP {response.status}")
-        except Exception as e:
-            logging.error(f"Критическая ошибка при обновлении моделей от {api_name.capitalize()}: {e}", exc_info=True)
-            await db.rollback()
-
-async def update_models_from_airforce(session: aiohttp.ClientSession):
-    api_name = "airforce"
-    async with get_db_connection() as db:
-        try:
-            await db.execute("DELETE FROM models WHERE api = ?", (api_name,))
-            url = "https://api.airforce/v1/models"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    models_data = await response.json()
-                    new_models = []
-                    
-                    for model_info in models_data.get("data", []):
-                        if model_info.get("supports_chat"):
-                            model_id = model_info.get("id")
-                            if not model_id: continue
-                            new_models.append((model_id, model_id, api_name))
-
-                    if new_models:
-                        await db.executemany("INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)", new_models)
-                    
-                    await db.commit()
-                    logging.info(f"Модели от {api_name.capitalize()} успешно обновлены.")
-                else:
-                    logging.error(f"Ошибка при получении моделей от {api_name.capitalize()}: HTTP {response.status}")
-        except Exception as e:
-            logging.error(f"Критическая ошибка при обновлении моделей от {api_name.capitalize()}: {e}", exc_info=True)
-            await db.rollback()
-
-async def update_models_from_mnn(session: aiohttp.ClientSession):
-    api_name = "mnn"
-    async with get_db_connection() as db:
-        try:
-            await db.execute("DELETE FROM models WHERE api = ?", (api_name,))
-            await db.execute("DELETE FROM image_recognition_models WHERE api = ?", (api_name,))
-            url = "https://api.mnnai.ru/v1/models"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    models_data = await response.json()
-                    new_models = []
-                    new_image_recognition_models = []
-                    
-                    for model_info in models_data.get("data", []):
-                        if model_info.get("type") == "chat.completions":
-                            model_id = model_info.get("id")
-                            if not model_id: continue
-
-                            new_models.append((model_id, model_id, api_name))
-                            
-                            if model_info.get("vision"):
-                                new_image_recognition_models.append((model_id, api_name))
-                    
-                    if new_models:
-                        await db.executemany("INSERT OR REPLACE INTO models (model_id, model_name, api) VALUES (?, ?, ?)", new_models)
-                    if new_image_recognition_models:
-                        await db.executemany("INSERT OR REPLACE INTO image_recognition_models (model_id, api) VALUES (?, ?)", new_image_recognition_models)
-
-                    await db.commit()
-                    logging.info(f"Модели от {api_name.upper()} успешно обновлены.")
-                else:
-                    logging.error(f"Ошибка при получении моделей от {api_name.upper()}: HTTP {response.status}")
-        except Exception as e:
-            logging.error(f"Критическая ошибка при обновлении моделей от {api_name.upper()}: {e}", exc_info=True)
-            await db.rollback()
 
 
 def is_allowed(user_id):
