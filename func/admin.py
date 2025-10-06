@@ -1,6 +1,6 @@
-import logging
-
 import aiosqlite
+import asyncio
+import logging
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -12,6 +12,31 @@ from keyboards import (get_api_selection_keyboard,
                        get_image_gen_model_selection_keyboard,
                        get_image_recognition_model_selection_keyboard,
                        get_models_by_api_keyboard)
+                       
+
+async def send_media_message(user_id, message):
+    try:
+        if message.text:
+            await bot.send_message(user_id, message.text)
+        elif message.photo:
+            await bot.send_photo(user_id, message.photo[-1].file_id, caption=message.caption)
+        elif message.video:
+            await bot.send_video(user_id, message.video.file_id, caption=message.caption)
+        elif message.audio:
+            await bot.send_audio(user_id, message.audio.file_id, caption=message.caption)
+        elif message.voice:
+            await bot.send_voice(user_id, message.voice.file_id)
+        elif message.document:
+            await bot.send_document(user_id, message.document.file_id, caption=message.caption)
+        elif message.sticker:
+            await bot.send_sticker(user_id, message.sticker.file_id)
+        elif message.video_note:
+            await bot.send_video_note(user_id, message.video_note.file_id)
+        elif message.animation:
+            await bot.send_animation(user_id, message.animation.file_id, caption=message.caption)
+    except Exception as e:
+        logging.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
+        raise
 
 
 async def cmd_add_user(message: types.Message, state: FSMContext):
@@ -528,36 +553,20 @@ async def cmd_send_to_all(message: types.Message, state: FSMContext):
 async def process_message_to_all(message: types.Message, state: FSMContext):
     user_ids = await get_all_allowed_users()
 
-    for user_id in user_ids:
-        try:
-            if message.text:
-                await bot.send_message(user_id, message.text)
-            elif message.photo:
-                await bot.send_photo(user_id, message.photo[-1].file_id, caption=message.caption)
-            elif message.video:
-                await bot.send_video(user_id, message.video.file_id, caption=message.caption)
-            elif message.audio:
-                await bot.send_audio(user_id, message.audio.file_id, caption=message.caption)
-            elif message.voice:
-                await bot.send_voice(user_id, message.voice.file_id)
-            elif message.document:
-                await bot.send_document(user_id, message.document.file_id, caption=message.caption)
-            elif message.sticker:
-                await bot.send_sticker(user_id, message.sticker.file_id)
-            elif message.video_note:
-                await bot.send_video_note(user_id, message.video_note.file_id)
-            elif message.animation:
-                await bot.send_animation(user_id, message.animation.file_id, caption=message.caption)
-
-        except Exception as e:
-            logging.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
+    # Отправляем сообщения пакетами по 100 штук
+    batch_size = 100
+    for i in range(0, len(user_ids), batch_size):
+        batch = user_ids[i:i+batch_size]
+        tasks = [send_media_message(user_id, message) for user_id in batch]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.sleep(0.5) # Пауза между пакетами
 
     await message.reply("Сообщение отправлено всем пользователям.")
     await state.set_state(Form.waiting_for_message)
 
 async def cmd_send_to_user(message: types.Message, state: FSMContext):
     await message.reply("Введите ID пользователя, которому нужно отправить сообщение:")
-    await state.set_state(Form.waiting_for_user_id_to_send)
+    await state.set_state(Form.waitING_for_user_id_to_send)
 
 async def process_user_id_to_send(message: types.Message, state: FSMContext):
     try:
@@ -574,25 +583,7 @@ async def process_message_to_user(message: types.Message, state: FSMContext):
     user_id = data.get("user_id_to_send")
 
     try:
-        if message.text:
-            await bot.send_message(user_id, message.text)
-        elif message.photo:
-            await bot.send_photo(user_id, message.photo[-1].file_id, caption=message.caption)
-        elif message.video:
-            await bot.send_video(user_id, message.video.file_id, caption=message.caption)
-        elif message.audio:
-            await bot.send_audio(user_id, message.audio.file_id, caption=message.caption)
-        elif message.voice:
-            await bot.send_voice(user_id, message.voice.file_id)
-        elif message.document:
-            await bot.send_document(user_id, message.document.file_id, caption=message.caption)
-        elif message.sticker:
-            await bot.send_sticker(user_id, message.sticker.file_id)
-        elif message.video_note:
-            await bot.send_video_note(user_id, message.video_note.file_id)
-        elif message.animation:
-            await bot.send_animation(user_id, message.animation.file_id, caption=message.caption)
-
+        await send_media_message(user_id, message)
         await message.reply(f"Сообщение отправлено пользователю с ID {user_id}.")
     except Exception as e:
         await message.reply(f"Ошибка при отправке сообщения пользователю с ID {user_id}: {e}")
