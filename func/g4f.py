@@ -1,8 +1,9 @@
-from config import bot
-from aiogram.fsm.context import FSMContext
-from database import load_context,save_context
-from aiogram import types
 from io import BytesIO
+
+from aiogram import types
+from aiogram.fsm.context import FSMContext
+from config import bot
+from database import load_context, save_context
 
 
 async def handle_image_recognition(message: types.Message, state: FSMContext):

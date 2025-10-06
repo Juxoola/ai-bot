@@ -1,8 +1,8 @@
-from aiogram import types, F
 import asyncio
-import random
-import httpx
 import logging
+
+import httpx
+from aiogram import F, types
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -10,15 +10,16 @@ logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(name)s - %(leve
 MAX_RETRIES = 3
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
-from config import Form, dp, bot,DEFAULT_SYSTEM_PROMPTS
-from database import load_context, save_context, is_admin, av_models, rec_models
-from keyboards import get_admin_keyboard, get_main_keyboard
-from handlers.check import clear_in_progress, exit_game
-from func.tictactoe import game_sessions as ttt_game_sessions
-from func.guess_number import game_sessions as guess_game_sessions
-from handlers.rate_limit import check_rate_limit
+from config import Form, bot, dp
+from database import (av_models, is_admin, load_context, rec_models,
+                      save_context)
 from func.decorators import access_required
+from func.guess_number import game_sessions as guess_game_sessions
+from func.tictactoe import game_sessions as ttt_game_sessions
+from handlers.check import clear_in_progress, exit_game
+from handlers.rate_limit import check_rate_limit
+from keyboards import get_main_keyboard
+
 
 @dp.message(Command("start"))
 @access_required

@@ -1,13 +1,13 @@
-from aiogram import types, F
-from aiogram.filters.command import Command
+from aiogram import F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
 from config import Form, dp
-from func.search import process_search_query
-from func.messages import handle_long_message, cmd_long_message
-from handlers.check import check_in_progress, set_in_progress, clear_in_progress
-from handlers.rate_limit import check_rate_limit
 from func.decorators import access_required
+from func.messages import cmd_long_message, handle_long_message
+from func.search import process_search_query
+from handlers.check import (check_in_progress, clear_in_progress,
+                            set_in_progress)
+from handlers.rate_limit import check_rate_limit
+
 
 @dp.message(F.text == "🌐 Поиск")
 @dp.message(F.text == "/search")

@@ -1,11 +1,17 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from keyboards import get_aspect_ratio_selection_keyboard, get_model_selection_keyboard, get_image_gen_model_selection_keyboard, get_image_recognition_model_selection_keyboard, get_settings_keyboard, get_voice_selection_keyboard, get_role_selection_keyboard, get_api_selection_keyboard, get_models_by_api_keyboard
-from config import bot, Form, update_user_clients, update_image_gen_client, DEFAULT_SYSTEM_PROMPTS
-from aiogram.fsm.context import FSMContext
-import logging
+
 from aiogram import types
-from database import load_context, save_context, av_models, gen_models, rec_models, def_gen_model, def_aspect, def_enhance, def_voice, av_voices
-import asyncio
+from aiogram.fsm.context import FSMContext
+from config import (DEFAULT_SYSTEM_PROMPTS, Form, bot, update_image_gen_client,
+                    update_user_clients)
+from database import (av_models, av_voices, def_aspect, def_enhance,
+                      def_gen_model, def_voice, gen_models, load_context,
+                      save_context)
+from keyboards import (get_api_selection_keyboard,
+                       get_aspect_ratio_selection_keyboard,
+                       get_image_gen_model_selection_keyboard,
+                       get_models_by_api_keyboard, get_role_selection_keyboard,
+                       get_settings_keyboard, get_voice_selection_keyboard)
+
 
 async def cmd_settings(message, state: FSMContext):
     user_id = message.from_user.id
@@ -221,8 +227,16 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
             initial_messages = [{"role": "system", "content": system_prompt}]
             
         if new_api_type == "g4f":
-            model_name=model_key.replace("_g4f", "")
+            model_name = model_key.replace("_g4f", "")
             await update_user_clients(user_id, model_name)
+            
+            # Получаем список провайдеров для выбранной g4f модели
+            from config import get_providers_for_model
+            providers = await get_providers_for_model(model_name)
+            providers_text = ", ".join(providers) if providers else "Нет доступных провайдеров"
+            
+            import logging
+            logging.info(f"User {user_id}: Доступные провайдеры для модели {model_name}: {providers_text}")
 
         user_context.update({
             "model": model_key,

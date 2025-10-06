@@ -19,4 +19,4 @@ PyMuPDF
 python-docx
 xlrd
 openpyxl
-pyngrok
+browser_cookie3

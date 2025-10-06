@@ -1,12 +1,16 @@
 import base64
 import logging
+import time
+
 from aiogram import types
 from aiogram.fsm.context import FSMContext
-from config import Form, get_anthropic_client, bot
+from config import Form, bot
 from database import load_context, save_context
-from .messages import call_anthropic_completion_sync, async_run_with_timeout, DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
-import time
-from datetime import timedelta
+
+from .messages import (DEFAULT_API_TIMEOUT, async_run_with_timeout,
+                       calculate_and_show_processing_time,
+                       call_anthropic_completion_sync)
+
 
 async def process_image_with_anthropic(message: types.Message, state: FSMContext, prompt: str):
     start_time = time.time()

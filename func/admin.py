@@ -1,12 +1,18 @@
-from aiogram.fsm.context import FSMContext
-from config import Form, bot, openai_clients, anthropic_clients
 import logging
-from database import is_admin,gen_models, av_models, rec_models,init_av_models, init_gen_models,init_rec_models,initialize_allowed_users,DATABASE_FILE, get_all_allowed_users
-from keyboards import get_image_gen_model_selection_keyboard,get_image_recognition_model_selection_keyboard, get_model_selection_keyboard, get_api_selection_keyboard, get_models_by_api_keyboard
-from aiogram import types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 import aiosqlite
-from func.decorators import admin_required
+from aiogram import types
+from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from config import Form, anthropic_clients, bot, openai_clients
+from database import (DATABASE_FILE, av_models, gen_models,
+                      get_all_allowed_users, init_av_models, init_gen_models,
+                      init_rec_models, initialize_allowed_users, rec_models)
+from keyboards import (get_api_selection_keyboard,
+                       get_image_gen_model_selection_keyboard,
+                       get_image_recognition_model_selection_keyboard,
+                       get_models_by_api_keyboard)
+
 
 async def cmd_add_user(message: types.Message, state: FSMContext):
     await message.reply("Введите ID пользователя, которого нужно добавить:")

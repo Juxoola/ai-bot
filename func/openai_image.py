@@ -1,16 +1,18 @@
+import asyncio
 import base64
 import logging
-import asyncio
+import time
+from io import BytesIO
+
 from aiogram import types
 from aiogram.fsm.context import FSMContext
-from config import Form, get_openai_client, bot
+from config import Form, bot
 from database import load_context, save_context
-from .messages import call_openai_completion_async, async_run_with_timeout, DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
-import time
-import base64
-import logging
-import asyncio
-from io import BytesIO
+
+from .messages import (DEFAULT_API_TIMEOUT, async_run_with_timeout,
+                       calculate_and_show_processing_time,
+                       call_openai_completion_async)
+
 
 async def process_image_with_openai(message: types.Message, state: FSMContext, prompt: str):
     start_time = time.time()

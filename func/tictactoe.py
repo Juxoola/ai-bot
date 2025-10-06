@@ -1,9 +1,10 @@
-from aiogram import types
-from aiogram.fsm.context import FSMContext
-import random
-from config import Form
 import asyncio
 import logging
+import random
+
+from aiogram import types
+from aiogram.fsm.context import FSMContext
+from config import Form
 
 # Константы для игры
 EMPTY = "⬜️"

@@ -1,6 +1,9 @@
 import os
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+
+from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
+                           KeyboardButton, ReplyKeyboardMarkup)
 from config import DEFAULT_SYSTEM_PROMPTS
+
 
 async def get_admin_keyboard():
     keyboard = [

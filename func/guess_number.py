@@ -1,9 +1,11 @@
-from aiogram import types
-from aiogram.fsm.context import FSMContext
-import random
-from config import Form
 import asyncio
 import logging
+import random
+
+from aiogram import types
+from aiogram.fsm.context import FSMContext
+from config import Form
+
 
 class GuessNumberGame:
     def __init__(self, min_number=1, max_number=100, max_attempts=8):

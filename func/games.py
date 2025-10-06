@@ -1,6 +1,6 @@
 from aiogram import types
 from aiogram.fsm.context import FSMContext
-from config import Form
+
 
 async def get_games_keyboard():
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[

@@ -1,20 +1,23 @@
-from aiogram.fsm.context import FSMContext
-from config import get_client, Form, openai_clients, anthropic_clients, DEFAULT_SYSTEM_PROMPTS, gemini_client
-from func.messages import send_message_in_parts, call_anthropic_completion_sync
-from database import load_context, save_context
-from aiogram import types
 import asyncio
 import logging
-from aiogram.enums import ParseMode
-from bs4 import BeautifulSoup
-from aiohttp import ClientSession, ClientTimeout, ClientError
-from urllib.parse import urlparse
 from typing import Iterator
-import os
+from urllib.parse import urlparse
+
+from aiogram import types
+from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from aiohttp import ClientError, ClientSession, ClientTimeout
+from bs4 import BeautifulSoup
+from config import (DEFAULT_SYSTEM_PROMPTS, Form, anthropic_clients,
+                    gemini_client, get_client, openai_clients)
+from database import load_context, save_context
 from duckduckgo_search import DDGS
-from duckduckgo_search.exceptions import DuckDuckGoSearchException
+from func.messages import call_anthropic_completion_sync, send_message_in_parts
 from google.genai import types as genai_types
-from .messages import call_openai_completion_async, async_run_with_timeout, DEFAULT_API_TIMEOUT
+
+from .messages import (DEFAULT_API_TIMEOUT, async_run_with_timeout,
+                       call_openai_completion_async)
+
 
 class SearchResults():
     def __init__(self, results: list, used_words: int):

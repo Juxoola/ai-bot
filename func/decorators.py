@@ -1,10 +1,11 @@
-from aiogram import types
-from aiogram.fsm.context import FSMContext
-from functools import wraps
 import asyncio
 import time
-from database import is_admin, is_allowed
+from functools import wraps
+
+from aiogram import types
 from aiogram.enums import ParseMode
+from database import is_admin, is_allowed
+
 
 def admin_required(func):
     @wraps(func)

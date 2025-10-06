@@ -1,27 +1,19 @@
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.fsm.state import State, StatesGroup
-from aiogram import Bot, Dispatcher
-import openai
+import importlib
+import json
+import logging
+import os
+
+import aiohttp
 import anthropic
-from google import genai
+import openai
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 from g4f.client import AsyncClient
 from g4f.Provider import RetryProvider
+from google import genai
 from groq import Groq
-from key import GROQ_API_KEY, GEMINI_API_KEY, BOT_TOKEN
-import os
-import logging
-import json
-import importlib
-import aiohttp
-
-
-# Monkey patch для PerplexityLabs - установка working = True
-try:
-    from g4f.Provider import PerplexityLabs
-    PerplexityLabs.working = True
-    logging.info("Monkey patch применен: PerplexityLabs.working = True")
-except ImportError:
-    logging.error("Не удалось импортировать PerplexityLabs для применения monkey patch")
+from key import BOT_TOKEN, GEMINI_API_KEY, GROQ_API_KEY
 
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "bot_data.db")
 
@@ -246,6 +238,13 @@ async def get_supported_providers(provider_classes, model_name=None):
 
     return supported_providers
 
+async def get_providers_for_model(model_name: str):
+    providers_list = []
+    for provider_class, models in PROVIDER_MODELS.items():
+        if model_name in models:
+            providers_list.append(provider_class.__name__)
+    return providers_list
+
 g4f_client_providers = []
 g4f_image_client_providers = []
 
@@ -281,9 +280,6 @@ async def update_g4f_clients(model_name=None):
 user_clients = {} 
 
 async def get_user_clients(user_id, model_name=None):
-    from g4f.Provider import RetryProvider
-    from g4f.client import AsyncClient
-    
     updated_chat_providers = await get_supported_providers(chat_providers, model_name)
     updated_image_providers = await get_supported_providers(image_providers, model_name)
     updated_image_gen_providers =await get_supported_providers(chat_providers, model_name)
@@ -313,7 +309,6 @@ async def update_user_clients(user_id, model_name=None):
     global user_clients
     user_clients[user_id] = await get_user_clients(user_id, model_name)
 
-    import logging
     logging.info(f"Clients updated for user {user_id} with model '{model_name}'")
     return user_clients[user_id]
 
@@ -338,9 +333,6 @@ async def init_enhance_prompt_client():
 async def update_image_gen_client(user_id, image_gen_model):
 
     global user_clients
-    from g4f.client import AsyncClient
-    from g4f.Provider import RetryProvider
-
     updated_image_gen_providers = await get_supported_providers(chat_providers, image_gen_model)
     new_client = AsyncClient(
         provider=RetryProvider(updated_image_gen_providers, shuffle=False),
@@ -350,7 +342,6 @@ async def update_image_gen_client(user_id, image_gen_model):
         user_clients[user_id] = await get_user_clients(user_id, image_gen_model)
     else:
         user_clients[user_id]["g4f_image_gen_client"] = new_client
-    import logging
     logging.info(f"User {user_id}: Image generation client updated with model '{image_gen_model}'")
     return new_client
 
@@ -381,8 +372,6 @@ async def get_image_recognition_providers(model_name=None):
 async def update_image_client_for_recognition(user_id, image_rec_model):
 
     global user_clients
-    from g4f.Provider import RetryProvider
-
     image_rec_providers = await get_image_recognition_providers(image_rec_model)
     
 

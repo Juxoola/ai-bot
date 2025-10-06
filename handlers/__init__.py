@@ -9,7 +9,6 @@ from . import games
 from . import check
 from . import rate_limit
 from . import message_handler
-
 __all__ = [
     'base',
     'settings_callbacks',
@@ -22,4 +21,4 @@ __all__ = [
     'check',
     'rate_limit',
     'message_handler',
-] 
+]

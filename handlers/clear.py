@@ -1,11 +1,13 @@
-from aiogram import types, F
-from aiogram.fsm.context import FSMContext
-from config import Form, dp, DEFAULT_SYSTEM_PROMPTS
-from handlers.check import check_in_progress, set_in_progress, clear_in_progress
-from handlers.rate_limit import check_rate_limit
-from func.decorators import access_required
-from database import reset_user_context
 import logging
+
+from aiogram import F, types
+from aiogram.fsm.context import FSMContext
+from config import dp
+from database import reset_user_context
+from func.decorators import access_required
+from handlers.check import (check_in_progress, clear_in_progress,
+                            set_in_progress)
+from handlers.rate_limit import check_rate_limit
 
 
 @dp.message(F.text == "🗑️ Очистить")

@@ -1,102 +1,86 @@
 import logging
+
 logging.basicConfig(level=logging.INFO, force=True)
 
-from dotenv import load_dotenv 
+from dotenv import load_dotenv
 
 load_dotenv()
-import aiohttp
-
-from aiogram import Bot, Dispatcher, F
-
-import os
 import asyncio
-from pyngrok import ngrok
-from g4f.cookies import set_cookies_dir, read_cookie_files
-import config
+import os
 
-from config import (
-    bot, dp, init_enhance_prompt_client 
-)
-from database import (
-    initialize_database, clear_all_user_contexts, 
-    init_all_user_clients, db_pool, update_all_external_models
-)
+import aiohttp
+import config
+from aiogram import Bot
+from aiogram.webhook.aiohttp_server import (SimpleRequestHandler,
+                                            setup_application)
+from aiohttp import web
+from config import bot, dp, init_enhance_prompt_client
+from database import (clear_all_user_contexts, db_pool, init_all_user_clients,
+                      initialize_database, update_all_external_models)
+from g4f.cookies import set_cookies_dir, read_cookie_files
 from handlers.check import ensure_initial_state
+
 
 import handlers
 
-
 WEBHOOK_PATH = f"/bot/{bot.token}"
-WEBHOOK_URL = ""
 
 async def on_startup(bot: Bot):
-    logging.info("Bot is starting up...")
+    logging.info("Запуск бота...")
 
     config.http_session = aiohttp.ClientSession()
 
     await initialize_database()
-    logging.info("Database initialized.")
-    logging.info("Updating all external models...")
+    logging.info("База данных инициализирована.")
+
+    logging.info("Обновление всех внешних моделей...")
     await update_all_external_models(config.http_session)
-    logging.info("External models updated.")
+    logging.info("Внешние модели обновлены.")
 
     if os.getenv("USE_WEBHOOK") == "1":
-        logging.info("Starting in webhook mode.")
-        # Set up ngrok
-        ngrok_token = os.getenv("NGROK_AUTHTOKEN")
-        if ngrok_token:
-            ngrok.set_auth_token(ngrok_token)
-        
-        http_tunnel = ngrok.connect(8000, "http")
-        global WEBHOOK_URL
-        WEBHOOK_URL = http_tunnel.public_url
-        logging.info(f"ngrok tunnel created: {WEBHOOK_URL}")
+        WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+        if not WEBHOOK_URL:
+            raise ValueError("WEBHOOK_URL не установлен в переменных окружения.")
+
+        logging.info(f"Запуск в режиме вебхука. URL: {WEBHOOK_URL}")
 
         await bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH)
-        logging.info("Webhook has been set.")
+        logging.info("Вебхук установлен.")
     else:
-        logging.info("Starting in polling mode.")
+        logging.info("Запуск в режиме опроса (polling).")
         await bot.delete_webhook()
-        logging.info("Any existing webhook has been deleted.")
+        logging.info("Существующий вебхук удален.")
 
 async def on_shutdown(bot: Bot):
-    logging.info("Bot is shutting down...")
-    
+    logging.info("Остановка бота...")
+
     if os.getenv("USE_WEBHOOK") == "1":
         await bot.delete_webhook()
-        logging.info("Webhook has been deleted.")
-
-        # Disconnect ngrok
-        tunnels = ngrok.get_tunnels()
-        for tunnel in tunnels:
-            ngrok.disconnect(tunnel.public_url)
-        logging.info("ngrok tunnels disconnected.")
+        logging.info("Вебхук удален.")
 
     if config.http_session:
         await config.http_session.close()
-        logging.info("AIOHTTP ClientSession closed.")
+        logging.info("Сессия AIOHTTP ClientSession закрыта.")
 
     await db_pool.close_all()
-    logging.info("Database connection pool closed.")
+    logging.info("Пул соединений с базой данных закрыт.")
 
 async def main():
+
     try:
         await on_startup(bot)
         await clear_all_user_contexts()
         await init_all_user_clients()
         await init_enhance_prompt_client()
-        
-        #cookies_dir = os.path.join(os.path.dirname(__file__), "har_and_cookies")
-        #set_cookies_dir(cookies_dir)
-        #read_cookie_files(cookies_dir)
-        print("Бот запущен и клиенты для всех пользователей инициализированы.")
-        
-        print("Система контроля состояний операций инициализирована.")
-        
-        if os.getenv("USE_WEBHOOK") == "1":
-            from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-            from aiohttp import web
 
+        cookies_dir = os.path.join(os.path.dirname(__file__), "har_and_cookies")
+        set_cookies_dir(cookies_dir)
+        read_cookie_files(cookies_dir)
+
+        logging.info("Бот запущен и клиенты для всех пользователей инициализированы.")
+        logging.info("Система контроля состояний операций инициализирована.")
+
+        if os.getenv("USE_WEBHOOK") == "1":
             app = web.Application()
             webhook_requests_handler = SimpleRequestHandler(
                 dispatcher=dp,
@@ -104,19 +88,19 @@ async def main():
             )
             webhook_requests_handler.register(app, path=WEBHOOK_PATH)
             setup_application(app, dp, bot=bot)
-            
+
             runner = web.AppRunner(app)
             await runner.setup()
             site = web.TCPSite(runner, 'localhost', 8000)
             await site.start()
-            
-            # Keep the bot running
+            logging.info("Веб-сервер запущен на localhost:8000")
+
             await asyncio.Event().wait()
         else:
             await dp.start_polling(bot, skip_updates=True)
-        
+
     except Exception as e:
-        print(f"Error during bot execution: {e}")
+        logging.error(f"Ошибка во время выполнения бота: {e}", exc_info=True)
     finally:
         await on_shutdown(bot)
 

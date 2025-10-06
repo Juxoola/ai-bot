@@ -1,8 +1,6 @@
-from aiogram import types
 import time
-import asyncio
-from aiogram.enums import ParseMode
 
+from aiogram import types
 
 rate_limit_data = {}
 

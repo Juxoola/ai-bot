@@ -1,19 +1,19 @@
-from aiogram import types, F
-from aiogram.filters.command import Command
+from aiogram import F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
-
 from config import Form, dp
-from settings import (
-    cmd_settings, select_model_handler, select_image_gen_model_handler,
-    select_aspect_ratio_handler,
-    process_enhance_selection_handler, close_settings_handler,
-    model_selection_handler, process_image_generation_model_handler, process_aspect_ratio_selection_handler,
-    toggle_processing_time_handler, select_role_handler, select_voice_handler,
-    process_voice_selection_handler, role_selection_handler, api_selection_handler
-)
-from handlers.rate_limit import check_rate_limit, check_callback_rate_limit
 from func.decorators import access_required
+from handlers.rate_limit import check_callback_rate_limit, check_rate_limit
+from settings import (api_selection_handler, close_settings_handler,
+                      cmd_settings, model_selection_handler,
+                      process_aspect_ratio_selection_handler,
+                      process_enhance_selection_handler,
+                      process_image_generation_model_handler,
+                      process_voice_selection_handler, role_selection_handler,
+                      select_aspect_ratio_handler,
+                      select_image_gen_model_handler, select_model_handler,
+                      select_role_handler, select_voice_handler,
+                      toggle_processing_time_handler)
+
 
 @dp.message(F.text == "⚙️ Настройки")
 @dp.message(F.text == "/settings")

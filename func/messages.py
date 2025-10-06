@@ -1,21 +1,24 @@
-from aiogram.fsm.context import FSMContext
-from config import Form, get_client, get_openai_client, openai_clients, should_bypass_timeout, bot, DEFAULT_SYSTEM_PROMPTS, anthropic_clients, get_anthropic_client, gemini_client
-import tempfile
-import os
-from datetime import timedelta
-from database import load_context,save_context, trim_context, is_admin
-from aiogram import types
 import asyncio
-import logging
-from aiogram.enums import ParseMode
-import time
-from google.genai import types as genai_types
-import re
 import base64
+import logging
+import os
+import re
+import tempfile
+import time
+from datetime import timedelta
+
 import aiofiles
 import aiofiles.os
-from pydub import AudioSegment
+from aiogram import types
+from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from config import (DEFAULT_SYSTEM_PROMPTS, Form, anthropic_clients, bot,
+                    gemini_client, get_anthropic_client, get_client,
+                    get_openai_client, openai_clients, should_bypass_timeout)
+from database import is_admin, load_context, save_context, trim_context
 from func.decorators import rate_limit
+from google.genai import types as genai_types
+from pydub import AudioSegment
 
 DEFAULT_API_TIMEOUT = 60
 AUDIO_API_TIMEOUT = 120

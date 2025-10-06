@@ -1,12 +1,18 @@
-from config import bot,Form, openai_clients
-from aiogram.fsm.context import FSMContext
-from database import load_context,save_context
-from aiogram import types
 import asyncio
 import logging
-import aiofiles.tempfile
-import aiofiles.os
 import os
+import subprocess
+
+import aiofiles.os
+import aiofiles.tempfile
+import fitz
+import openpyxl
+import xlrd
+from aiogram import types
+from aiogram.fsm.context import FSMContext
+from config import Form, bot, openai_clients
+from database import load_context, save_context
+from docx import Document
 
 
 async def handle_files_or_urls(message: types.Message, state: FSMContext):
@@ -44,7 +50,7 @@ async def handle_files_or_urls(message: types.Message, state: FSMContext):
                 return
 
             user_context = await load_context(user_id)
-            model_key = user_context["model"]  
+            model_key = user_context["model"]
             model_id, api_type = model_key.split('_')
             allowed_apis = list(openai_clients.keys()) + ["g4f"]
 
@@ -74,10 +80,6 @@ async def handle_files_or_urls(message: types.Message, state: FSMContext):
             await aiofiles.os.remove(temp_file_path)
 
 async def process_local_file(file_path):
-    import fitz 
-    import os
-    import logging
-    
     file_content = ""
     try:
         file_ext = os.path.splitext(file_path)[1].lower()
@@ -91,7 +93,6 @@ async def process_local_file(file_path):
         
         # Microsoft Word (.docx) документы
         elif file_ext == ".docx":
-            from docx import Document
             doc = await asyncio.to_thread(Document, file_path)
             for para in doc.paragraphs:
                 file_content += para.text + "\n"
@@ -107,7 +108,6 @@ async def process_local_file(file_path):
         elif file_ext == ".doc":
             try:
                 # Используем antiword как основной способ
-                import subprocess
                 result = await asyncio.to_thread(subprocess.run, ['antiword', file_path], capture_output=True, text=True)
                 if result.returncode == 0:
                     file_content = result.stdout
@@ -117,7 +117,6 @@ async def process_local_file(file_path):
                 logging.warning(f"Не удалось обработать .doc с помощью antiword: {e2}")
                 try:
                     # Пробуем через libreoffice как запасной вариант
-                    import os
                     tmp_txt = f"{file_path}.txt"
                     result = await asyncio.to_thread(subprocess.run, ['libreoffice', '--headless', '--convert-to', 'txt', file_path,
                                              '--outdir', os.path.dirname(file_path)],
@@ -140,7 +139,6 @@ async def process_local_file(file_path):
         
         # Microsoft Excel (.xlsx) таблицы
         elif file_ext == ".xlsx":
-            import openpyxl
             wb = await asyncio.to_thread(openpyxl.load_workbook, file_path, data_only=True)
             for sheet in wb.worksheets:
                 file_content += f"Лист: {sheet.title}\n"
@@ -151,7 +149,6 @@ async def process_local_file(file_path):
         # Старые Microsoft Excel (.xls) таблицы
         elif file_ext == ".xls":
             try:
-                import xlrd
                 wb = await asyncio.to_thread(xlrd.open_workbook, file_path)
                 for sheet_index in range(wb.nsheets):
                     sheet = wb.sheet_by_index(sheet_index)

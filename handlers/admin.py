@@ -1,23 +1,28 @@
-from aiogram import types, F
+from aiogram import F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import Command
-from config import dp, Form, bot
-from keyboards import get_admin_keyboard, get_main_keyboard
-from database import is_admin
+from config import Form, dp
+from func.admin import (cmd_add_image_gen_model, cmd_add_image_rec_model,
+                        cmd_add_model, cmd_add_user,
+                        cmd_delete_image_gen_model, cmd_delete_image_rec_model,
+                        cmd_delete_model, cmd_remove_user, cmd_send_to_all,
+                        cmd_send_to_user, process_add_user_id,
+                        process_confirm_delete,
+                        process_confirm_delete_image_gen_model,
+                        process_confirm_delete_image_rec_model,
+                        process_delete_image_gen_model_name,
+                        process_delete_image_rec_model_name,
+                        process_delete_model_api_selection,
+                        process_delete_model_by_api, process_delete_model_name,
+                        process_message_to_all, process_message_to_user,
+                        process_new_image_gen_model_api,
+                        process_new_image_gen_model_id,
+                        process_new_image_rec_model_api,
+                        process_new_image_rec_model_id, process_new_model_api,
+                        process_new_model_id, process_new_model_name,
+                        process_remove_user_id, process_user_id_to_send)
 from func.decorators import admin_required
-from func.admin import (cmd_send_to_all, process_message_to_all, cmd_send_to_user,
-                        process_user_id_to_send, process_message_to_user,
-                        cmd_add_user, process_add_user_id, cmd_remove_user,
-                        process_remove_user_id, cmd_add_model, process_new_model_name,
-                        process_new_model_id, process_new_model_api, cmd_delete_model,
-                        process_delete_model_name, process_confirm_delete,
-                        cmd_add_image_rec_model, cmd_delete_image_rec_model,
-                        process_delete_image_rec_model_name, process_confirm_delete_image_rec_model,
-                        cmd_add_image_gen_model, cmd_delete_image_gen_model,
-                        process_delete_image_gen_model_name, process_confirm_delete_image_gen_model,
-                        process_new_image_rec_model_id, process_new_image_rec_model_api,
-                        process_new_image_gen_model_id, process_new_image_gen_model_api,
-                        process_delete_model_api_selection, process_delete_model_by_api)
+from keyboards import get_admin_keyboard, get_main_keyboard
+
 
 @dp.message(F.text == "👑 Панель администратора")
 @admin_required

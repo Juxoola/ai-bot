@@ -1,14 +1,13 @@
-from aiogram import types, F
-from aiogram.filters.command import Command
+from aiogram import F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
-
 from config import Form, dp
 from database import whisp_models
 from func.audio import handle_audio, process_whisper_model_selection
-from handlers.check import check_in_progress, set_in_progress, clear_in_progress
-from handlers.rate_limit import check_rate_limit, check_callback_rate_limit
 from func.decorators import access_required
+from handlers.check import (check_in_progress, clear_in_progress,
+                            set_in_progress)
+from handlers.rate_limit import check_callback_rate_limit, check_rate_limit
+
 
 @dp.message(F.text == "🎤 Аудио")
 @dp.message(F.text == "/audio")

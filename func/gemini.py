@@ -1,20 +1,23 @@
-from aiogram import types
-from aiogram.fsm.context import FSMContext
-from config import Form,  bot, DEFAULT_SYSTEM_PROMPTS, gemini_client
-
-from PIL import Image
-import io
-from database import load_context,save_context
-from .messages import calculate_and_show_processing_time
-import time
 import asyncio
 import base64
+import io
 import logging
-from aiogram.enums import ParseMode
-from google.genai import types as genai_types
 import os
-import aiofiles.tempfile
+import time
+
 import aiofiles.os
+import aiofiles.tempfile
+from aiogram import types
+from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from config import DEFAULT_SYSTEM_PROMPTS, Form, bot, gemini_client
+from database import load_context, save_context
+from google.genai import types as genai_types
+from PIL import Image
+
+from .files import process_local_file
+from .messages import calculate_and_show_processing_time
+
 
 async def handle_image(message: types.Message, state: FSMContext):
     if not message.photo:
@@ -71,7 +74,7 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
 
         response = await gemini_client.aio.models.generate_content(
             model=model_id,
-                contents=[pil_image, prompt], 
+                contents=[pil_image, prompt],
                 config=config,
         )
         response_text = response.text
@@ -131,7 +134,7 @@ async def handle_document_with_conversion(message: types.Message, state: FSMCont
         "txt": "text/plain",
         "js": "application/x-javascript",
         "py": "application/x-python",
-        "html": "text/html", 
+        "html": "text/html",
         "htm": "text/html",
         "css": "text/css",
         "md": "text/md",
@@ -176,8 +179,6 @@ async def handle_document_with_conversion(message: types.Message, state: FSMCont
                 await tmp_file.write(file_data.read())
                 temp_file_path = tmp_file.name
                 
-            from func.files import process_local_file
-            
             file_content = await process_local_file(temp_file_path)
             
             if file_content == "Unsupported file type" or file_content.startswith("Error processing file"):

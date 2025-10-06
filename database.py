@@ -1,18 +1,18 @@
-from key import ALLOWED_USER_IDS, ADMIN_USER_ID
-import json
-import base64
-from io import BytesIO
-import aiosqlite
 import asyncio
-from collections import deque
-from contextlib import asynccontextmanager
-import os
-from config import openai_clients, DEFAULT_SYSTEM_PROMPTS, providers_config
-import time
-from cachetools import TTLCache
+import base64
+import json
 import logging
-import aiohttp
+import os
 from asyncio import Queue
+from contextlib import asynccontextmanager
+from io import BytesIO
+
+import aiohttp
+import aiosqlite
+from cachetools import TTLCache
+from config import (DEFAULT_SYSTEM_PROMPTS, providers_config,
+                    update_image_gen_client, update_user_clients)
+from key import ADMIN_USER_ID, ALLOWED_USER_IDS
 
 AVAILABLE_MODELS = None
 IMAGE_GENERATION_MODELS = None
@@ -365,7 +365,6 @@ async def _create_default_context(db, user_id):
     await save_context(user_id, context)
 
     if api_type == "g4f":
-        from config import update_user_clients, update_image_gen_client
         model_key = context["model"].split('_')[0]
         update_user_clients(user_id, model_key)
         image_gen_model_id = context["image_generation_model"].split('_')[0]
@@ -645,6 +644,14 @@ MODEL_SOURCES_CONFIG = {
         "name_path": lambda item: item.get("id"),
         "vision_path": lambda item: item.get("vision"),
     },
+    "llm7": {
+        "api_name": "llm7", "url": "https://api.llm7.io/v1/models",
+        "items_path": lambda data: data,
+        "filter": lambda item: True,
+        "id_path": lambda item: item.get("id"),
+        "name_path": lambda item: item.get("id"),
+        "vision_path": lambda item: "image" in item.get("modalities", {}).get("input", []),
+    },
 }
 
 async def update_all_external_models(session: aiohttp.ClientSession):
@@ -738,8 +745,6 @@ async def get_all_allowed_users():
 
 async def init_all_user_clients():
     try:
-        from config import update_user_clients, update_image_gen_client
-        from database import def_gen_model
         DEFAULT_IMAGE_GEN_MODEL = await def_gen_model()
 
         async with get_db_connection() as db:

@@ -1,6 +1,7 @@
-from aiogram.fsm.context import FSMContext
 from aiogram import types
+from aiogram.fsm.context import FSMContext
 from config import Form
+
 
 async def check_in_progress(message: types.Message, state: FSMContext):
     if await state.get_state() is None:

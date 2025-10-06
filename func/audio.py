@@ -1,12 +1,14 @@
-from config import bot,Form,groq_client
-from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram import types
 import asyncio
 import logging
 import os
-import aiofiles.tempfile
+
 import aiofiles.os
+import aiofiles.tempfile
+from aiogram import types
+from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from config import Form, bot, groq_client
+
 
 async def handle_audio(message: types.Message, state: FSMContext,WHISPER_MODELS):
 

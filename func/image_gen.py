@@ -1,25 +1,24 @@
-from config import bot, get_client,Form, openai_clients, gemini_client
-import config
-from aiogram.fsm.context import FSMContext
-from database import load_context,def_enhance, def_gen_model, def_aspect
-from aiogram import types
 import asyncio
 import logging
-from io import BytesIO
-from func.messages import async_run_with_timeout
-import aiohttp
-from urllib.parse import quote, urlencode
-import random
-from google.genai import types as genai_types
-import time
-from PIL import Image
-from .messages import DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
-import requests
-from deep_translator import GoogleTranslator
-from handlers.check import check_in_progress, set_in_progress, clear_in_progress
-import base64
 import os
+import random
+import time
+from io import BytesIO
+from urllib.parse import quote, urlencode
+
+import aiohttp
 import config
+from aiogram import types
+from aiogram.fsm.context import FSMContext
+from config import Form, bot, gemini_client, get_client, openai_clients
+from database import def_aspect, def_enhance, def_gen_model, load_context
+from deep_translator import GoogleTranslator
+from func.messages import async_run_with_timeout
+from google.genai import types as genai_types
+from handlers.check import check_in_progress
+from PIL import Image
+
+from .messages import DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
 
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]

@@ -1,16 +1,21 @@
-from aiogram import types, F
-from aiogram.filters.command import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
-from config import Form, dp
-from func.games import cmd_games
-from func.tictactoe import process_tictactoe_callback, TicTacToeGame, game_sessions as ttt_game_sessions, get_game_keyboard, COMPUTER
-from func.guess_number import process_guess_callback, GuessNumberGame, game_sessions as guess_game_sessions, get_input_keyboard
-from handlers.check import check_in_progress, set_in_progress, clear_in_progress
-from handlers.rate_limit import check_rate_limit, check_callback_rate_limit
 import asyncio
 import logging
+
+from aiogram import F, types
+from aiogram.fsm.context import FSMContext
+from config import Form, dp
 from func.decorators import access_required
+from func.games import cmd_games
+from func.guess_number import GuessNumberGame
+from func.guess_number import game_sessions as guess_game_sessions
+from func.guess_number import get_input_keyboard, process_guess_callback
+from func.tictactoe import COMPUTER, TicTacToeGame
+from func.tictactoe import game_sessions as ttt_game_sessions
+from func.tictactoe import get_game_keyboard, process_tictactoe_callback
+from handlers.check import (check_in_progress, clear_in_progress,
+                            set_in_progress)
+from handlers.rate_limit import check_callback_rate_limit, check_rate_limit
+
 
 @dp.message(F.text == "🎮 Игры")
 @dp.message(F.text == "/games")
