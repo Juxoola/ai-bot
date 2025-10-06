@@ -214,26 +214,35 @@ async def calculate_and_show_processing_time(message, user_context, start_time):
     
     return formatted_processing_time
 
-def process_audio_sync(ogg_bytes: bytes) -> bytes:
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_ogg:
-        temp_ogg.write(ogg_bytes)
-        temp_ogg_path = temp_ogg.name
-
-    temp_mp3_path = temp_ogg_path.replace('.ogg', '.mp3')
-    
+async def process_audio_async(ogg_bytes: bytes) -> bytes:
+    temp_ogg_path = None
+    temp_mp3_path = None
     try:
-        audio = AudioSegment.from_ogg(temp_ogg_path)
-        audio.export(temp_mp3_path, format="mp3")
+        async with aiofiles.tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_ogg:
+            await temp_ogg.write(ogg_bytes)
+            temp_ogg_path = temp_ogg.name
+
+        temp_mp3_path = temp_ogg_path.replace('.ogg', '.mp3')
+
+        def _convert_sync():
+            audio = AudioSegment.from_ogg(temp_ogg_path)
+            audio.export(temp_mp3_path, format="mp3")
+
+        await asyncio.to_thread(_convert_sync)
+
+        async with aiofiles.open(temp_mp3_path, 'rb') as mp3_file:
+            mp3_bytes = await mp3_file.read()
         
-        with open(temp_mp3_path, 'rb') as mp3_file:
-            mp3_bytes = mp3_file.read()
         return mp3_bytes
+
+    except Exception as e:
+        print(f"Произошла ошибка при конвертации аудио: {e}")
+        return None
     finally:
-        # Очищаем временные файлы
-        if os.path.exists(temp_ogg_path):
-            os.remove(temp_ogg_path)
-        if os.path.exists(temp_mp3_path):
-            os.remove(temp_mp3_path)
+        if temp_ogg_path and await aiofiles.os.path.exists(temp_ogg_path):
+            await aiofiles.os.remove(temp_ogg_path)
+        if temp_mp3_path and await aiofiles.os.path.exists(temp_mp3_path):
+            await aiofiles.os.remove(temp_mp3_path)
 
 async def _process_g4f_message(message, user_context, user_id, model_id, message_text, is_long_message, start_time):
     if user_context.get("g4f_image") and (not is_long_message or model_id == user_context.get("image_recognition_model")):
@@ -242,10 +251,9 @@ async def _process_g4f_message(message, user_context, user_id, model_id, message
             image_data = user_context["g4f_image"]
             image_to_use = image_data
             if hasattr(image_data, 'read') and not isinstance(image_data, str):
-                if hasattr(image_data, 'seek'):
-                    image_data.seek(0)
-                image_bytes = image_data.read()
-                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                async with aiofiles.open(image_data.name, 'rb') as f:
+                    image_bytes = await f.read()
+                image_b64 = await asyncio.to_thread(lambda: base64.b64encode(image_bytes).decode('utf-8'))
                 image_to_use = f"data:image/jpeg;base64,{image_b64}"
             
             messages = user_context["messages"] if not is_long_message else [{"role": "user", "content": message_text}]
@@ -285,14 +293,10 @@ async def _process_gemini_message(message, user_context, model_id, message_text,
         if not system_instruction:
             system_instruction = DEFAULT_SYSTEM_PROMPTS.get("default")
 
-        current_prompt = message_text if is_long_message else message.text
-        history_for_model.append({'role': 'user', 'parts': [{'text': current_prompt}]})
-
         config = genai_types.GenerateContentConfig(system_instruction=system_instruction) if system_instruction else None
         
         response = await gemini_client.aio.models.generate_content(model=model_id, contents=history_for_model, config=config)
         
-        user_context["messages"].append({'role': 'user', 'parts': [{'text': current_prompt}]})
         return response
 
     logging.info(f"[{time.strftime('%H:%M:%S')}] Начало запроса к Gemini API{' (длинное сообщение)' if is_long_message else ''}")
@@ -312,6 +316,7 @@ async def _process_gemini_message(message, user_context, model_id, message_text,
 
     return None
 
+
 async def _process_openai_audio_message(message, user_id, model_id, api_type, encoded_audio, audio_format, start_time):
     try:
         client = await get_openai_client(api_type)
@@ -330,21 +335,22 @@ async def _process_openai_audio_message(message, user_id, model_id, api_type, en
         if result and result.choices and hasattr(result.choices[0].message, 'audio') and result.choices[0].message.audio:
             choice = result.choices[0].message
             response_text = choice.audio.transcript
-            response_audio = base64.b64decode(choice.audio.data)
+            response_audio = await asyncio.to_thread(lambda: base64.b64decode(choice.audio.data))
             
             temp_wav_path = f"temp_audio_{user_id}.wav"
             async with aiofiles.open(temp_wav_path, "wb") as f:
                 await f.write(response_audio)
             
             temp_ogg_path = f"temp_audio_{user_id}.ogg"
-            AudioSegment.from_wav(temp_wav_path).export(temp_ogg_path, format="ogg")
+            await asyncio.to_thread(lambda: AudioSegment.from_wav(temp_wav_path).export(temp_ogg_path, format="ogg"))
             
             try:
-                with open(temp_ogg_path, "rb") as audio_file:
-                    await message.reply_audio(audio=types.BufferedInputFile(audio_file.read(), filename="response.ogg"), caption="🔊 Аудио-ответ")
+                 async with aiofiles.open(temp_ogg_path, "rb") as audio_file:
+                    audio_data = await audio_file.read()
+                    await message.reply_audio(audio=types.BufferedInputFile(audio_data, filename="response.ogg"), caption="🔊 Аудио-ответ")
             finally:
-                if os.path.exists(temp_wav_path): os.remove(temp_wav_path)
-                if os.path.exists(temp_ogg_path): os.remove(temp_ogg_path)
+                if os.path.exists(temp_wav_path): await aiofiles.os.remove(temp_wav_path)
+                if os.path.exists(temp_ogg_path): await aiofiles.os.remove(temp_ogg_path)
             
             if user_context.get("show_processing_time", True):
                 processing_time = str(timedelta(seconds=int(time.time() - start_time)))
@@ -453,7 +459,6 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
         return None
 
 async def send_response(message: types.Message, response_text: str):
-    """Отправляет ответ пользователю, обрабатывая длинные сообщения и ошибки Markdown."""
     try:
         if len(response_text) > MAX_MESSAGE_LENGTH:
             await send_message_in_parts(message, response_text, MAX_MESSAGE_LENGTH)
@@ -510,7 +515,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
             audio_bytes = audio_data.read() if hasattr(audio_data, 'read') else audio_data
             
             if message.voice:
-                audio_bytes = await asyncio.to_thread(process_audio_sync, audio_bytes)
+                audio_bytes = await process_audio_async(audio_bytes)
                 audio_format = "mp3"
             elif message.audio and message.audio.mime_type:
                 mime_type = message.audio.mime_type
@@ -521,7 +526,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
                 await message.reply("🚨 Неподдерживаемый формат аудио.")
                 return
 
-            encoded_audio = base64.b64encode(audio_bytes).decode('utf-8')
+            encoded_audio = await asyncio.to_thread(lambda: base64.b64encode(audio_bytes).decode('utf-8'))
             if api_type not in openai_clients:
                 await message.reply("🚨 Выбранная модель не поддерживает аудио-ответы.")
                 return

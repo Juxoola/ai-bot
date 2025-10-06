@@ -4,8 +4,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import types
 import asyncio
 import logging
-import tempfile
 import os
+import aiofiles.tempfile
+import aiofiles.os
 
 async def handle_audio(message: types.Message, state: FSMContext,WHISPER_MODELS):
 
@@ -35,10 +36,9 @@ async def handle_audio(message: types.Message, state: FSMContext,WHISPER_MODELS)
         file_path = file.file_path
         audio_data = await bot.download_file(file_path)
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp_file:
-            tmp_file.write(audio_data.read())
+        async with aiofiles.tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp_file:
+            await tmp_file.write(audio_data.read())
             temp_audio_path = tmp_file.name
-
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
         keyboard.inline_keyboard.append([InlineKeyboardButton(text=f"----- Выберите модель Whisper -----", callback_data="ignore")])
 
@@ -97,7 +97,7 @@ async def process_whisper_model_selection(callback_query: types.CallbackQuery, s
         await bot.send_message(user_id, f"🚨Произошла ошибка при транскрипции аудио: {e}")
     finally:
         if temp_audio_path and os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
+            await aiofiles.os.remove(temp_audio_path)
     await state.set_state(Form.waiting_for_message)
 
 

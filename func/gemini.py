@@ -12,8 +12,9 @@ import base64
 import logging
 from aiogram.enums import ParseMode
 from google.genai import types as genai_types
-import tempfile
 import os
+import aiofiles.tempfile
+import aiofiles.os
 
 async def handle_image(message: types.Message, state: FSMContext):
     if not message.photo:
@@ -159,7 +160,7 @@ async def handle_document_with_conversion(message: types.Message, state: FSMCont
         user_context["messages"].append({
             "role": "user",
             "parts": [
-                {"mime_type": mime_type, "data": base64_file}
+                {"inline_data": {"mime_type": mime_type, "data": base64_file}}
             ]
         })
 
@@ -171,13 +172,13 @@ async def handle_document_with_conversion(message: types.Message, state: FSMCont
         try:
             await message.reply("🔔Файл не поддерживается Gemini напрямую. Начинаю конвертацию...")
             
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file_name}") as tmp_file:
-                tmp_file.write(file_data.read())
+            async with aiofiles.tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file_name}") as tmp_file:
+                await tmp_file.write(file_data.read())
                 temp_file_path = tmp_file.name
                 
             from func.files import process_local_file
             
-            file_content = await asyncio.to_thread(process_local_file, temp_file_path)
+            file_content = await process_local_file(temp_file_path)
             
             if file_content == "Unsupported file type" or file_content.startswith("Error processing file"):
                 await message.reply(
@@ -190,17 +191,17 @@ async def handle_document_with_conversion(message: types.Message, state: FSMCont
                 )
                 
                 user_context["messages"].append({
-                    "role": "user", 
+                    "role": "user",
                     "parts": [
-                        {"mime_type": "text/plain", "data": base64_content}
+                        {"inline_data": {"mime_type": "text/plain", "data": base64_content}}
                     ]
                 })
-                
+                                
                 await save_context(user_id, user_context)
                 await message.reply(f"🔔Файл {extension.upper()} успешно конвертирован в текстовый формат, закодирован в base64 и добавлен в контекст. Теперь вы можете задавать вопросы.")
                 
             if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
+                await aiofiles.os.remove(temp_file_path)
         except Exception as e:
             logging.error(f"Ошибка при конвертации файла для Gemini: {e}")
             await message.reply(f"🚨Произошла ошибка при конвертации файла: {e}")

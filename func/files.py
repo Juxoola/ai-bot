@@ -4,7 +4,8 @@ from database import load_context,save_context
 from aiogram import types
 import asyncio
 import logging
-import tempfile
+import aiofiles.tempfile
+import aiofiles.os
 import os
 
 
@@ -20,13 +21,13 @@ async def handle_files_or_urls(message: types.Message, state: FSMContext):
             file_path = file.file_path
             file_data = await bot.download_file(file_path)
 
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=f"_{message.document.file_name}"
+            async with aiofiles.tempfile.NamedTemporaryFile(
+                "wb", delete=False, suffix=f"_{message.document.file_name}"
             ) as tmp_file:
-                tmp_file.write(file_data.read())
+                await tmp_file.write(file_data.read())
                 temp_file_path = tmp_file.name
 
-            file_content = await asyncio.to_thread(process_local_file, temp_file_path)
+            file_content = await process_local_file(temp_file_path)
 
             if file_content == "Unsupported file type":
                 await processing_msg.edit_text(
@@ -70,9 +71,9 @@ async def handle_files_or_urls(message: types.Message, state: FSMContext):
         await state.set_state(Form.waiting_for_message)
     finally:
         if "temp_file_path" in locals() and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+            await aiofiles.os.remove(temp_file_path)
 
-def process_local_file(file_path):
+async def process_local_file(file_path):
     import fitz 
     import os
     import logging
@@ -83,14 +84,15 @@ def process_local_file(file_path):
         
         # PDF файлы
         if file_ext == ".pdf":
-            with fitz.open(file_path) as doc:
-                for page in doc:
-                    file_content += page.get_text()
+            doc = await asyncio.to_thread(fitz.open, file_path)
+            for page in doc:
+                file_content += await asyncio.to_thread(page.get_text)
+            doc.close()
         
         # Microsoft Word (.docx) документы
         elif file_ext == ".docx":
             from docx import Document
-            doc = Document(file_path)
+            doc = await asyncio.to_thread(Document, file_path)
             for para in doc.paragraphs:
                 file_content += para.text + "\n"
             # Также получаем текст из таблиц
@@ -106,7 +108,7 @@ def process_local_file(file_path):
             try:
                 # Используем antiword как основной способ
                 import subprocess
-                result = subprocess.run(['antiword', file_path], capture_output=True, text=True)
+                result = await asyncio.to_thread(subprocess.run, ['antiword', file_path], capture_output=True, text=True)
                 if result.returncode == 0:
                     file_content = result.stdout
                 else:
@@ -117,8 +119,8 @@ def process_local_file(file_path):
                     # Пробуем через libreoffice как запасной вариант
                     import os
                     tmp_txt = f"{file_path}.txt"
-                    result = subprocess.run(['libreoffice', '--headless', '--convert-to', 'txt', file_path, 
-                                             '--outdir', os.path.dirname(file_path)], 
+                    result = await asyncio.to_thread(subprocess.run, ['libreoffice', '--headless', '--convert-to', 'txt', file_path,
+                                             '--outdir', os.path.dirname(file_path)],
                                             capture_output=True, text=True)
                     
                     # Определяем имя выходного файла
@@ -126,10 +128,10 @@ def process_local_file(file_path):
                     file_name_without_ext = os.path.splitext(base_name)[0]
                     converted_txt = os.path.join(os.path.dirname(file_path), f"{file_name_without_ext}.txt")
                     
-                    if os.path.exists(converted_txt):
-                        with open(converted_txt, 'r', encoding='utf-8', errors='ignore') as f:
-                            file_content = f.read()
-                        os.remove(converted_txt)
+                    if await aiofiles.os.path.exists(converted_txt):
+                        async with aiofiles.open(converted_txt, 'r', encoding='utf-8', errors='ignore') as f:
+                            file_content = await f.read()
+                        await aiofiles.os.remove(converted_txt)
                     else:
                         raise Exception("Конвертация не удалась")
                 except Exception as e3:
@@ -139,7 +141,7 @@ def process_local_file(file_path):
         # Microsoft Excel (.xlsx) таблицы
         elif file_ext == ".xlsx":
             import openpyxl
-            wb = openpyxl.load_workbook(file_path, data_only=True)
+            wb = await asyncio.to_thread(openpyxl.load_workbook, file_path, data_only=True)
             for sheet in wb.worksheets:
                 file_content += f"Лист: {sheet.title}\n"
                 for row in sheet.iter_rows(values_only=True):
@@ -150,7 +152,7 @@ def process_local_file(file_path):
         elif file_ext == ".xls":
             try:
                 import xlrd
-                wb = xlrd.open_workbook(file_path)
+                wb = await asyncio.to_thread(xlrd.open_workbook, file_path)
                 for sheet_index in range(wb.nsheets):
                     sheet = wb.sheet_by_index(sheet_index)
                     file_content += f"Лист: {sheet.name}\n"
@@ -163,13 +165,13 @@ def process_local_file(file_path):
                 try:
                     # Резервный метод через libreoffice
                     tmp_csv = f"{file_path}.csv"
-                    result = subprocess.run(['libreoffice', '--headless', '--convert-to', 'csv', file_path, 
-                                             '--outdir', os.path.dirname(file_path)], 
+                    result = await asyncio.to_thread(subprocess.run, ['libreoffice', '--headless', '--convert-to', 'csv', file_path,
+                                             '--outdir', os.path.dirname(file_path)],
                                             capture_output=True, text=True)
-                    if os.path.exists(tmp_csv):
-                        with open(tmp_csv, 'r', encoding='utf-8', errors='ignore') as f:
-                            file_content = f.read()
-                        os.remove(tmp_csv)
+                    if await aiofiles.os.path.exists(tmp_csv):
+                        async with aiofiles.open(tmp_csv, 'r', encoding='utf-8', errors='ignore') as f:
+                            file_content = await f.read()
+                        await aiofiles.os.remove(tmp_csv)
                     else:
                         raise Exception("Конвертация не удалась")
                 except Exception as e2:
@@ -183,8 +185,8 @@ def process_local_file(file_path):
             ".c", ".cpp", ".h", ".java", ".rb", ".pl", ".rs", ".go", ".ts", ".jsx", ".tsx",
             ".conf", ".ini", ".toml", ".lua", ".bat", ".ps1", ".yml"
         ):
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                file_content += f.read()
+            async with aiofiles.open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                file_content += await f.read()
         else:
             return "Unsupported file type"
             
