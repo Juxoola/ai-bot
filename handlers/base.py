@@ -59,9 +59,6 @@ async def cmd_help(message: types.Message, state: FSMContext):
         return
 
 
-    AVAILABLE_MODELS = await av_models()
-    REC_MODELS = await rec_models()
-    
     help_text = (
         "Доступные команды:\n"
         "/start - Запустить бота\n"
@@ -75,10 +72,36 @@ async def cmd_help(message: types.Message, state: FSMContext):
         "/keyboard - Восстановить клавиатуру, если она исчезла\n"
         "/meme - Получить случайный мем\n"
         "/games - Открыть меню игр\n"
+        "/rec_models - Показать доступные модели для распознавания изображений\n"
         "Также можно присылать документы и изображения\n"
     )
     
     await message.reply(help_text)
+
+    if is_admin(message.from_user.id):
+        await message.answer(
+            "Команды администратора:\n"
+            "/add_model - Добавить новую модель для чата\n"
+            "/delete_model - Удалить существующую модель для чата\n"
+            "/add_image_gen_model - Добавить новую модель для генерации изображений\n"
+            "/delete_image_gen_model - Удалить существующую модель для генерации изображений\n"
+            "/add_image_rec_model - Добавить новую модель для распознавания изображений\n"
+            "/delete_image_rec_model - Удалить существующую модель для распознавания изображений\n"
+            "/add_user - Добавить пользователя\n"
+            "/remove_user - Удалить пользователя\n"
+            "/send_to_all - Отправить сообщение всем пользователям\n"
+            "/send_to_user - Отправить сообщение конкретному пользователю\n"
+        )
+
+@dp.message(F.text == "👁️ Модели распознавания")
+@dp.message(Command("rec_models"))
+@access_required
+async def cmd_image_recognition_models(message: types.Message, state: FSMContext):
+    if not await check_rate_limit(message, "image_recognition_models"):
+        return
+
+    AVAILABLE_MODELS = await av_models()
+    REC_MODELS = await rec_models()
     
     rec_models_by_api = {}
     for model_key, model_data in REC_MODELS.items():
@@ -104,22 +127,8 @@ async def cmd_help(message: types.Message, state: FSMContext):
             models_text += "• " + "\n• ".join(models) + "\n\n"
         
         await message.answer(models_text)
-
-    if is_admin(message.from_user.id):
-        await message.answer(
-            "Команды администратора:\n"
-            "/add_model - Добавить новую модель для чата\n"
-            "/delete_model - Удалить существующую модель для чата\n"
-            "/add_image_gen_model - Добавить новую модель для генерации изображений\n"
-            "/delete_image_gen_model - Удалить существующую модель для генерации изображений\n"
-            "/add_image_rec_model - Добавить новую модель для распознавания изображений\n"
-            "/delete_image_rec_model - Удалить существующую модель для распознавания изображений\n"
-            "/add_user - Добавить пользователя\n"
-            "/remove_user - Удалить пользователя\n"
-            "/send_to_all - Отправить сообщение всем пользователям\n"
-            "/send_to_user - Отправить сообщение конкретному пользователю\n"
-        )
-
+    else:
+        await message.answer("Нет доступных моделей для распознавания изображений.")
 
 @dp.message(F.text == "⌨️ Вернуть клавиатуру")
 @dp.message(F.text == "/keyboard")

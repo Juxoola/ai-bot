@@ -658,12 +658,28 @@ async def async_run_with_timeout(func, timeout, *args, **kwargs):
     try:
         if asyncio.iscoroutinefunction(func):
             task = asyncio.create_task(func(*args, **kwargs))
-            return await asyncio.wait_for(task, timeout=timeout)
+            try:
+                return await asyncio.wait_for(task, timeout=timeout)
+            except asyncio.TimeoutError:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                raise TimeoutError(f"Вызов функции превысил таймаут {timeout} сек.")
         else:
             loop = asyncio.get_running_loop()
             
             future = loop.run_in_executor(None, lambda: func(*args, **kwargs))
-            return await asyncio.wait_for(future, timeout=timeout)
+            try:
+                return await asyncio.wait_for(future, timeout=timeout)
+            except asyncio.TimeoutError:
+                future.cancel()
+                try:
+                    await future
+                except asyncio.CancelledError:
+                    pass
+                raise TimeoutError(f"Вызов функции превысил таймаут {timeout} сек.")
             
     except asyncio.TimeoutError:
         raise TimeoutError(f"Вызов функции превысил таймаут {timeout} сек.")

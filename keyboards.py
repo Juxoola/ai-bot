@@ -52,7 +52,8 @@ async def get_main_keyboard(include_admin_button=False):
             KeyboardButton(text="🎮 Игры")
         ],
         [
-            KeyboardButton(text="ℹ️ Помощь")
+            KeyboardButton(text="ℹ️ Помощь"),
+            KeyboardButton(text="👁️ Модели распознавания")
         ]
     ]
     
