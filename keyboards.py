@@ -149,7 +149,7 @@ async def get_api_selection_keyboard(available_models):
     
     return keyboard
 
-async def get_models_by_api_keyboard(available_models, selected_api):
+async def get_models_by_api_keyboard(available_models, selected_api, recognition_models):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     keyboard.inline_keyboard.append(
         [InlineKeyboardButton(text=f"----- Модели {selected_api.upper()} -----", callback_data="ignore")]
@@ -159,19 +159,24 @@ async def get_models_by_api_keyboard(available_models, selected_api):
     counter = 1
     
     api_models = []
-    for model_id, model_data in available_models.items():
+    for model_key, model_data in available_models.items():
         if model_data["api"] == selected_api:
-            api_models.append((model_id, model_data["model_name"]))
+            api_models.append((model_key, model_data))
     
-    api_models.sort(key=lambda x: x[1])
+    api_models.sort(key=lambda x: x[1]["model_name"])
     
     buttons_row = []
-    for model_id, model_name in api_models:
+    for model_key, model_data in api_models:
         short_id = f"m{counter}"
-        model_map[short_id] = model_id
+        model_map[short_id] = model_key
         counter += 1
         
-        button = InlineKeyboardButton(text=model_name, callback_data=f"model_{short_id}")
+        model_name = model_data["model_name"]
+        display_name = model_name
+        if model_key in recognition_models or model_data.get("api") == "gemini":
+            display_name = f"👁️{model_name}"
+        
+        button = InlineKeyboardButton(text=display_name, callback_data=f"model_{short_id}")
         buttons_row.append(button)
         if len(buttons_row) == 2:
             keyboard.inline_keyboard.append(buttons_row)

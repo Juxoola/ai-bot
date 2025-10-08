@@ -5,7 +5,7 @@ from config import (DEFAULT_SYSTEM_PROMPTS, Form, bot, update_image_gen_client,
                     update_user_clients)
 from database import (av_models, av_voices, def_aspect, def_enhance,
                       def_gen_model, def_voice, gen_models, load_context,
-                      save_context)
+                      rec_models, save_context)
 from keyboards import (get_api_selection_keyboard,
                        get_aspect_ratio_selection_keyboard,
                        get_image_gen_model_selection_keyboard,
@@ -73,7 +73,9 @@ async def api_selection_handler(callback_query: types.CallbackQuery, state: FSMC
     api_type = callback_query.data.split("api_")[1]
     await state.update_data(selected_api=api_type)
     
-    keyboard, model_map = await get_models_by_api_keyboard(AVAILABLE_MODELS, api_type)
+    recognition_models = await rec_models()
+    
+    keyboard, model_map = await get_models_by_api_keyboard(AVAILABLE_MODELS, api_type, recognition_models)
     await state.update_data(model_map=model_map)
 
     await bot.edit_message_text(
