@@ -16,7 +16,7 @@ from func.openai_image import (handle_image_openai,
 from handlers.check import (check_in_progress, clear_in_progress,
                             set_in_progress)
 from handlers.rate_limit import check_rate_limit
-import loggign
+import logging
 
 
 @dp.message()
