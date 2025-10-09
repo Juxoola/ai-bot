@@ -7,6 +7,7 @@ from func.image_gen import (process_image_editing,
 from handlers.check import (check_in_progress, clear_in_progress,
                             set_in_progress)
 from handlers.rate_limit import check_rate_limit
+import logging
 
 
 @dp.message(F.text == "🎨 Сгенерировать")
@@ -70,7 +71,8 @@ async def process_image_generation_prompt_handler(message: types.Message, state:
         await clear_in_progress(state, message)
     except Exception as e:
         await clear_in_progress(state, message)
-        await message.reply(f"🔔Произошла ошибка при генерации изображения: {e}")
+        logging.error(f"🔔Произошла ошибка при генерации изображения: {e}")
+        await message.reply("🔔Произошла ошибка при генерации изображения.")
 
 
 @dp.message(Form.waiting_for_image_edit_instructions)
@@ -92,6 +94,7 @@ async def process_image_edit_instructions_handler(message: types.Message, state:
         await clear_in_progress(state, message)
     except Exception as e:
         await clear_in_progress(state, message)
-        await message.reply(f"🔔Произошла ошибка при редактировании изображения: {e}")
+        logging.error(f"🔔Произошла ошибка при редактировании изображения: {e}")
+        await message.reply("🔔Произошла ошибка при редактировании изображения.")
 
 

@@ -195,7 +195,7 @@ if raw_provider_models:
             provider_class = get_provider(key)
             PROVIDER_MODELS[provider_class] = models
     except Exception as e:
-        logging.error("Error parsing PROVIDER_MODELS env variable: %s", e)
+        logging.error("Ошибка при разборе переменной окружения PROVIDER_MODELS: %s", e)
         PROVIDER_MODELS = {}
 else:
     PROVIDER_MODELS = {}
@@ -215,7 +215,7 @@ if raw_provider_image_recognition_models:
             provider_class = get_provider(key)
             PROVIDER_IMAGE_RECOGNITION_MODELS[provider_class] = models
     except Exception as e:
-        logging.error("Error parsing PROVIDER_IMAGE_RECOGNITION_MODELS env variable: %s", e)
+        logging.error("Ошибка при разборе переменной окружения PROVIDER_IMAGE_RECOGNITION_MODELS: %s", e)
         PROVIDER_IMAGE_RECOGNITION_MODELS = {}
 else:
     PROVIDER_IMAGE_RECOGNITION_MODELS = {}

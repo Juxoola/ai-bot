@@ -73,7 +73,8 @@ async def handle_files_or_urls(message: types.Message, state: FSMContext):
         if 'processing_msg' in locals():
             await processing_msg.edit_text(f"🚨 Произошла ошибка при обработке файла: {e}")
         else:
-            await message.reply(f"🚨 Произошла ошибка при обработке файла: {e}")
+            await message.reply("🚨 Произошла ошибка при обработке файла.")
+            logging.error(f"🚨 Произошла ошибка при обработке файла: {e}")
         await state.set_state(Form.waiting_for_message)
     finally:
         if "temp_file_path" in locals() and os.path.exists(temp_file_path):
@@ -174,7 +175,6 @@ async def process_local_file(file_path):
                 except Exception as e2:
                     logging.error(f"Все методы обработки .xls не удались: {e2}")
                     return "Error processing .xls file: All methods failed"
-        
         # Стандартные текстовые файлы
         elif file_ext in (
             ".txt", ".xml", ".json", ".js", ".har", ".sh", ".py",

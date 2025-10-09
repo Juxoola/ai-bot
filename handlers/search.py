@@ -7,6 +7,7 @@ from func.search import process_search_query
 from handlers.check import (check_in_progress, clear_in_progress,
                             set_in_progress)
 from handlers.rate_limit import check_rate_limit
+import logging
 
 
 @dp.message(F.text == "🌐 Поиск")
@@ -43,7 +44,8 @@ async def process_search_query_handler(message: types.Message, state: FSMContext
         await clear_in_progress(state, message)
     except Exception as e:
         await clear_in_progress(state, message)
-        await message.reply(f"🔔Произошла ошибка при выполнении поискового запроса: {e}")
+        logging.error(f"🔔Произошла ошибка при обработке длинного сообщения: {e}")
+        await message.reply("🔔Произошла ошибка при выполнении поискового запроса.")
 
 
 @dp.message(F.text == "📝 Длинное сообщение")
@@ -73,4 +75,5 @@ async def handle_long_message_handler(message: types.Message, state: FSMContext)
         await clear_in_progress(state, message)
     except Exception as e:
         await clear_in_progress(state, message)
-        await message.reply(f"🔔Произошла ошибка при обработке длинного сообщения: {e}")
+        logging.error(f"🔔Произошла ошибка при обработке длинного сообщения: {e}")
+        await message.reply("🔔Произошла ошибка при обработке длинного сообщения.")

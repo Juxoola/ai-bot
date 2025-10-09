@@ -1,4 +1,5 @@
 from aiogram import F, types
+import logging
 from aiogram.fsm.context import FSMContext
 from config import Form, dp
 from database import whisp_models
@@ -36,7 +37,8 @@ async def cmd_audio(message: types.Message, state: FSMContext):
         await clear_in_progress(state, message)
     except Exception as e:
         await clear_in_progress(state, message)
-        await message.reply(f"🔔Произошла ошибка: {e}")
+        logging.error(f"🔔Произошла ошибка: {e}")
+        await message.reply("🔔Произошла ошибка.")
 
 @dp.message(Form.waiting_for_audio, lambda message: message.audio or message.voice or message.document and message.document.mime_type.startswith('audio/') or message.video_note)
 async def handle_audio_handler(message: types.Message, state: FSMContext):
@@ -56,7 +58,8 @@ async def handle_audio_handler(message: types.Message, state: FSMContext):
         await clear_in_progress(state, message)
     except Exception as e:
         await clear_in_progress(state, message)
-        await message.reply(f"🔔Произошла ошибка при обработке аудио: {e}")
+        logging.error(f"🔔Произошла ошибка при обработке аудио: {e}")
+        await message.reply("🔔Произошла ошибка при обработке аудио.")
 
 @dp.callback_query(Form.waiting_for_whisper_model_selection, lambda c: c.data and c.data.startswith("whisper_model_"))
 async def process_whisper_model_selection_handler(callback_query: types.CallbackQuery, state: FSMContext):
@@ -86,5 +89,6 @@ async def process_whisper_model_selection_handler(callback_query: types.Callback
         await clear_in_progress(state, callback_query.message)
     except Exception as e:
         await clear_in_progress(state, callback_query.message)
-        await callback_query.message.reply(f"🔔Произошла ошибка при выборе модели: {e}")
+        logging.error(f"🔔Произошла ошибка при выборе модели: {e}")
+        await callback_query.message.reply("🔔Произошла ошибка при выборе модели.")
         await callback_query.answer()

@@ -283,7 +283,7 @@ async def _process_g4f_message(message, user_context, user_id, model_id, message
                 user_context["messages"].append({"role": "assistant", "content": response_text})
             return response_text
     except TimeoutError:
-        logging.error(f"Timeout in g4f request{' (long message)' if is_long_message else ''}")
+        logging.error(f"Тайм-аут в g4f запросе{' (длинное сообщение)' if is_long_message else ''}")
         await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
     
     return None
@@ -314,7 +314,7 @@ async def _process_gemini_message(message, user_context, model_id, message_text,
                 user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
             return response_text
     except TimeoutError:
-        logging.error(f"Timeout in gemini_request{' (long message)' if is_long_message else ''}")
+        logging.error(f"Тайм-аут в gemini_request{' (длинное сообщение)' if is_long_message else ''}")
         await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
 
     return None
@@ -365,11 +365,11 @@ async def _process_openai_audio_message(message, user_id, model_id, api_type, en
             await message.reply("🚨 Модель не вернула аудио-ответ или ответ некорректен")
 
     except TimeoutError:
-        logging.error("Timeout in audio_api_request")
+        logging.error("Тайм-аут в audio_api_request")
         await message.reply(f"🕒 Превышено время ожидания ответа ({AUDIO_API_TIMEOUT} сек) от аудио-модели.")
     except Exception as e:
         logging.error(f"Ошибка при обработке аудио запроса: {e}")
-        await message.reply(f"🚨 Ошибка при обработке аудио: {str(e)}")
+        await message.reply("🚨 Ошибка при обработке аудио.")
         
     return None
 
@@ -386,7 +386,7 @@ async def _process_openai_text_message(message, user_context, model_id, api_type
             logging.error(f"Ответ от {api_type} API не содержит ожидаемых данных: {result}")
             await message.reply(f"🚨 Ошибка: получен некорректный ответ от {api_type} API.")
     except TimeoutError:
-        logging.error(f"Timeout in openai_client request{' (long message)' if is_long_message else ''}")
+        logging.error(f"Тайм-аут в openai_client запросе{' (длинное сообщение)' if is_long_message else ''}")
         await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
     
     return None
@@ -414,11 +414,11 @@ async def _process_anthropic_message(message, user_context, user_id, model_id, a
             return response_text
             
     except TimeoutError:
-        logging.error("Timeout in Anthropic API request")
+        logging.error("Тайм-аут в Anthropic API запросе")
         await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
     except Exception as e:
         logging.exception(f"Ошибка при вызове Anthropic API: {e}")
-        await message.reply(f"❌ Ошибка при обработке запроса: {e}")
+        await message.reply("❌ Ошибка при обработке запроса.")
         
     return None
 
@@ -458,7 +458,7 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
     
     except Exception as e:
         logging.error(f"Ошибка во время запроса к API: {e}")
-        await message.reply(f"🚨Произошла ошибка: {e}")
+        await message.reply("🚨Произошла ошибка.")
         return None
 
 async def send_response(message: types.Message, response_text: str):
@@ -537,7 +537,7 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
 
         except Exception as e:
             logging.error(f"Ошибка при обработке аудио: {e}")
-            await message.reply(f"🚨 Произошла ошибка при обработке аудио: {str(e)}")
+            await message.reply("🚨 Произошла ошибка при обработке аудио.")
             return
 
     message_text = message.text or ""

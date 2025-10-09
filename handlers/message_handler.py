@@ -16,6 +16,7 @@ from func.openai_image import (handle_image_openai,
 from handlers.check import (check_in_progress, clear_in_progress,
                             set_in_progress)
 from handlers.rate_limit import check_rate_limit
+import loggign
 
 
 @dp.message()
@@ -137,4 +138,5 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         await clear_in_progress(state, message)
     except Exception as e:
         await clear_in_progress(state, message)
-        await message.reply(f"🚨Произошла ошибка: {e}") 
+        logging.error(f"🚨Произошла ошибка: {e}") 
+        await message.reply("🚨Произошла ошибка.")

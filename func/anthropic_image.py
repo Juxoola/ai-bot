@@ -89,8 +89,8 @@ async def process_image_with_anthropic(message: types.Message, state: FSMContext
         await calculate_and_show_processing_time(message, user_context, start_time)
 
     except Exception as e:
-        logging.error(f"Error during Anthropic image processing: {e}")
-        await message.reply(f"🔔Произошла ошибка при обработке изображения: {e}")
+        logging.error(f"Ошибка при обработке изображения Anthropic: {e}")
+        await message.reply("🔔Произошла ошибка при обработке изображения.")
     finally:
         await state.set_state(Form.waiting_for_message)
         await state.update_data(image_data=None, img_type=None)

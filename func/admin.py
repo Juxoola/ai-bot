@@ -586,6 +586,7 @@ async def process_message_to_user(message: types.Message, state: FSMContext):
         await send_media_message(user_id, message)
         await message.reply(f"Сообщение отправлено пользователю с ID {user_id}.")
     except Exception as e:
-        await message.reply(f"Ошибка при отправке сообщения пользователю с ID {user_id}: {e}")
+        await message.reply(f"Ошибка при отправке сообщения пользователю с ID {user_id}.")
+        logging.error(f"Ошибка загрузки моделей распознавания изображений: {e}")
 
     await state.set_state(Form.waiting_for_message)

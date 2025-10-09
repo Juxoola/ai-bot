@@ -71,7 +71,7 @@ async def translate_prompt(prompt, user_id, original_message_id):
             )
             return translated_prompt
     except Exception as e:
-        logging.error(f"Error during prompt translation: {e}")
+        logging.error(f"Ошибка во время перевода промпта: {e}")
         await bot.send_message(
             user_id,
             f"⚠️ Не удалось перевести запрос на английский: {e}",
@@ -90,7 +90,7 @@ async def enhance_prompt(prompt, user_id):
         )
         return improved_prompt.choices[0].message.content
     except Exception as e:
-        logging.error(f"Error during prompt improvement: {e}")
+        logging.error(f"Ошибка во время улучшения промпта: {e}")
         await bot.send_message(user_id, f"🚨Ошибка при улучшении промпта: {e}")
         return prompt
 
@@ -114,7 +114,7 @@ async def generate_with_retry(generation_func, max_retries=3):
         try:
             return await async_run_with_timeout(generation_func, DEFAULT_API_TIMEOUT)
         except Exception as e:
-            logging.error(f"Error during image generation (retry {attempt + 1}/{max_retries}): {e}")
+            logging.error(f"Ошибка во время генерации изображения (попытка {attempt + 1}/{max_retries}): {e}")
             if attempt + 1 == max_retries:
                 raise
             await asyncio.sleep(1)
@@ -231,7 +231,7 @@ async def process_image_generation_prompt(message: types.Message, state: FSMCont
             await send_generated_image(user_id, image_data, caption, original_message_id)
 
     except Exception as e:
-        logging.error(f"Failed to generate image with {api_type}/{model_id}: {e}")
+        logging.error(f"Не удалось сгенерировать изображение с помощью {api_type}/{model_id}: {e}")
         await bot.send_message(
             user_id,
             "🚨 Не удалось сгенерировать изображение после нескольких попыток. Пожалуйста, попробуйте еще раз.",
@@ -312,7 +312,7 @@ async def edit_image_pollinations(instructions, image_data, model_id, user_id, o
         await send_generated_image(user_id, edited_image_data, caption, original_message_id)
 
     except Exception as e:
-        logging.error(f"Error during Pollinations image editing: {e}")
+        logging.error(f"Ошибка во время редактирования изображения Pollinations: {e}")
         await bot.send_message(user_id, "🚨 Ошибка при редактировании изображения", reply_to_message_id=original_message_id)
 
 
@@ -362,7 +362,7 @@ async def edit_image_gemini(instructions, image_data, model_id, user_id, origina
         await asyncio.gather(*tasks)
 
     except Exception as e:
-        logging.error(f"Error during Gemini image editing: {e}")
+        logging.error(f"Ошибка во время редактирования изображения Gemini: {e}")
         await bot.send_message(user_id, f"🚨 Ошибка при редактировании: {e}", reply_to_message_id=original_message_id)
 
 

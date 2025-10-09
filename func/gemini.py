@@ -98,7 +98,7 @@ async def process_custom_image_prompt(message: types.Message, state: FSMContext)
 
     except Exception as e:
         logging.error(f"Ошибка при обработке изображения/промпта: {e}", exc_info=True)
-        await message.reply(f"🚨 Произошла ошибка: {e}")
+        await message.reply("🚨 Произошла ошибка.")
     finally:
         await state.set_state(Form.waiting_for_message)
         await state.update_data(image_data=None)
@@ -205,7 +205,7 @@ async def handle_document_with_conversion(message: types.Message, state: FSMCont
                 await aiofiles.os.remove(temp_file_path)
         except Exception as e:
             logging.error(f"Ошибка при конвертации файла для Gemini: {e}")
-            await message.reply(f"🚨Произошла ошибка при конвертации файла: {e}")
+            await message.reply("🚨Произошла ошибка при конвертации файла.")
     
     await state.set_state(Form.waiting_for_message)
 

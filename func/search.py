@@ -199,7 +199,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
             try:
                 result = await async_run_with_timeout(call_openai_completion_async, DEFAULT_API_TIMEOUT, api_type, model_id, user_context["messages"])
             except TimeoutError as e:
-                logging.error(f"Timeout in openai_client request (long message): {e}")
+                logging.error(f"Тайм-аут в запросе openai_client (длинное сообщение): {e}")
                 await message.reply("🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT}. Попробуйте еще раз или выберите другую модель.")
                 result = None
 
@@ -225,7 +225,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
                     DEFAULT_API_TIMEOUT
                 )
             except TimeoutError as e:
-                logging.error(f"Timeout in anthropic_client request (long message): {e}")
+                logging.error(f"Тайм-аут в запросе anthropic_client (длинное сообщение): {e}")
                 await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
                 result = None
 
@@ -243,7 +243,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
             try:
                 response = await async_run_with_timeout(g4f_request, DEFAULT_API_TIMEOUT)
             except TimeoutError as e:
-                logging.error(f"Timeout in g4f_image_request (long message): {e}")
+                logging.error(f"Тайм-аут в запросе g4f_image_request (длинное сообщение): {e}")
                 await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
                 response = None
 
@@ -279,7 +279,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
             try:
                 response = await async_run_with_timeout(gemini_request, DEFAULT_API_TIMEOUT)
             except TimeoutError as e:
-                logging.error(f"Timeout in gemini_request (long message): {e}")
+                logging.error(f"Тайм-аут в запросе gemini_request (длинное сообщение): {e}")
                 await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT}). Попробуйте еще раз или выберите другую модель.")
                 response = None
             
@@ -305,5 +305,5 @@ async def process_search_query(message: types.Message, state: FSMContext):
         await save_context(user_id, user_context)
     except Exception as e:
         logging.error(f"Ошибка во время веб-поиска или отправки в модель: {e}")
-        await message.reply(f"🚨Произошла ошибка во время веб-поиска или отправки в модель: {e}")
+        await message.reply("🚨Произошла ошибка во время веб-поиска или отправки в модель.")
     await state.set_state(Form.waiting_for_message)

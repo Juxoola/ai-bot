@@ -87,7 +87,7 @@ async def start_tictactoe_game(callback_query: types.CallbackQuery, state: FSMCo
         await clear_in_progress(state)
     except Exception as e:
         await clear_in_progress(state)
-        await callback_query.message.reply(f"🔔 Произошла ошибка при запуске игры: {e}")
+        await callback_query.message.reply("🔔 Произошла ошибка при запуске игры.")
         await callback_query.answer()
 
 
@@ -98,7 +98,7 @@ async def tictactoe_callback_handler(callback_query: types.CallbackQuery, state:
         await process_tictactoe_callback(callback_query, state)
     except Exception as e:
         await state.set_state(Form.waiting_for_message)
-        await callback_query.message.reply(f"🔔 Произошла ошибка в игре: {e}")
+        await callback_query.message.reply("🔔 Произошла ошибка в игре.")
         await callback_query.answer()
 
 
@@ -150,7 +150,7 @@ async def start_guess_number_game(callback_query: types.CallbackQuery, state: FS
         await clear_in_progress(state)
     except Exception as e:
         await clear_in_progress(state)
-        await callback_query.message.reply(f"🔔 Произошла ошибка при запуске игры: {e}")
+        await callback_query.message.reply("🔔 Произошла ошибка при запуске игры.")
         await callback_query.answer()
 
 
@@ -160,7 +160,7 @@ async def guess_number_callback_handler(callback_query: types.CallbackQuery, sta
         await process_guess_callback(callback_query, state)
     except Exception as e:
         await state.set_state(Form.waiting_for_message)
-        await callback_query.message.reply(f"🔔 Произошла ошибка в игре: {e}")
+        await callback_query.message.reply("🔔 Произошла ошибка в игре.")
         await callback_query.answer()
 
 

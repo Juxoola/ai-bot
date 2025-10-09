@@ -144,7 +144,7 @@ class DatabaseConnectionPool:
                 try:
                     await conn.close()
                 except Exception as e:
-                    logging.error(f"Error closing connection from pool: {e}")
+                    logging.error(f"Ошибка закрытия соединения из пула: {e}")
             self._active_connections = 0
 
 db_pool = DatabaseConnectionPool(max_connections=50)
@@ -167,9 +167,9 @@ async def optimize_database():
                 VACUUM;
             """)
             await db.commit()
-            logging.info("Database optimization completed successfully")
+            logging.info("Оптимизация базы данных завершена успешно")
         except Exception as e:
-            logging.error(f"Error during database optimization: {e}")
+            logging.error(f"Ошибка при оптимизации базы данных: {e}")
             await db.rollback()
 
 async def _setup_database(db):
@@ -463,7 +463,7 @@ async def save_context(user_id, context):
                 
             except Exception as e:
                 await db.rollback()
-                logging.error(f"Error saving context for user {user_id}: {e}")
+                logging.error(f"Ошибка сохранения контекста для пользователя {user_id}: {e}")
                 raise e
 
 async def _load_data(query, default_data):
@@ -472,7 +472,7 @@ async def _load_data(query, default_data):
             cursor = await db.execute(query)
             return await cursor.fetchall()
     except Exception as e:
-        logging.error(f"Error loading data: {e}")
+        logging.error(f"Ошибка загрузки данных: {e}")
         return default_data
 
 async def load_models():
@@ -502,7 +502,7 @@ async def _save_data(table_name, columns, data):
             await db.commit()
         except Exception as e:
             await db.rollback()
-            logging.error(f"Error saving data to {table_name}: {e}")
+            logging.error(f"Ошибка сохранения данных в {table_name}: {e}")
             raise
 
 async def save_models(models):
@@ -541,7 +541,7 @@ async def _update_models_from_source(session: aiohttp.ClientSession, config: dic
     if config.get("requires_token"):
         token = providers_config.get(api_name, {}).get("api_key")
         if not token:
-            logging.warning(f"API ключ для '{api_name}' не найден. Обновление пропущено.")
+            logging.warning(f"API-ключ для '{api_name}' не найден. Обновление пропущено.")
             return
         headers["Authorization"] = f"Bearer {token}"
 
@@ -655,10 +655,10 @@ MODEL_SOURCES_CONFIG = {
 }
 
 async def update_all_external_models(session: aiohttp.ClientSession):
-    logging.info("Starting update of all external models...")
+    logging.info("Начало обновления всех внешних моделей...")
     tasks = [_update_models_from_source(session, config) for config in MODEL_SOURCES_CONFIG.values()]
     await asyncio.gather(*tasks)
-    logging.info("External models update process finished.")
+    logging.info("Процесс обновления внешних моделей завершен.")
 
 
 def is_allowed(user_id):
@@ -689,7 +689,7 @@ async def rec_models():
                     }
             return models
     except Exception as e:
-        print(f"Error loading image recognition models: {e}")
+        logging.info(f"Ошибка загрузки моделей распознавания изображений: {e}")
         return {}
 
 
