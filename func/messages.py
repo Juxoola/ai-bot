@@ -424,7 +424,6 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
             else:
                 user_context["messages"].append({"role": "user", "parts": [{"text": message_text}]})
         else:
-            # Для других API, используем формат {"role": "user", "content": "..."}
             user_context["messages"].append({"role": "user", "content": message_text})
 
     if api_type == "g4f":

@@ -15,7 +15,6 @@ from keyboards import (get_api_selection_keyboard,
 
 
 async def _get_allowed_apis(include_anthropic: bool = True) -> list[str]:
-    """Возвращает список разрешенных API."""
     apis = list(openai_clients.keys()) + ["gemini", "g4f"]
     if include_anthropic:
         apis.extend(list(anthropic_clients.keys()))
@@ -23,7 +22,6 @@ async def _get_allowed_apis(include_anthropic: bool = True) -> list[str]:
 
 
 async def _delete_message_safe(chat_id: int, message_id: int):
-    """Безопасно удаляет сообщение, обрабатывая возможные исключения."""
     if message_id:
         try:
             await bot.delete_message(chat_id=chat_id, message_id=message_id)
