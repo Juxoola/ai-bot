@@ -201,6 +201,23 @@ async def convert_dashed_code_blocks_to_markdown(text):
     return result
 
             
+async def _handle_api_request(message, request_func, timeout, api_name, model_id, is_long_message, start_time):
+    log_prefix = f"[{time.strftime('%H:%M:%S')}] Начало запроса к {api_name} API с моделью {model_id}"
+    log_suffix = f"{' (длинное сообщение)' if is_long_message else ''}"
+    logging.info(f"{log_prefix}{log_suffix}")
+
+    try:
+        response = await async_run_with_timeout(request_func, timeout)
+        logging.info(f"Запрос к {api_name} API завершен за {time.time() - start_time:.5f} секунд")
+        return response
+    except TimeoutError:
+        logging.error(f"Тайм-аут в {api_name} запросе{log_suffix}")
+        await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
+    except Exception as e:
+        logging.error(f"Ошибка при выполнении запроса к {api_name} API: {e}")
+        await message.reply(f"🚨 Ошибка при обработке запроса к {api_name} API.")
+    return None
+
 MAX_MESSAGE_LENGTH = 4050
 
 async def calculate_and_show_processing_time(message, user_context, start_time):
@@ -239,7 +256,7 @@ async def process_audio_async(ogg_bytes: bytes) -> bytes:
         return mp3_bytes
 
     except Exception as e:
-        print(f"Произошла ошибка при конвертации аудио: {e}")
+        logging.error(f"Произошла ошибка при конвертации аудио: {e}")
         return None
     finally:
         if temp_ogg_path and await aiofiles.os.path.exists(temp_ogg_path):
@@ -261,30 +278,22 @@ async def _process_g4f_message(message, user_context, user_id, model_id, message
             
             messages = user_context["messages"] if not is_long_message else [{"role": "user", "content": message_text}]
             return await user_g4f_client.chat.completions.create(model=model_id, messages=messages, image=image_to_use)
-
-        logging.info(f"[{time.strftime('%H:%M:%S')}] Начало запроса к G4F image API{' (длинное сообщение)' if is_long_message else ''}")
+ 
         timeout = DEFAULT_API_TIMEOUT
-        request_func = g4f_image_request
+        response = await _handle_api_request(message, g4f_image_request, timeout, "G4F image", model_id, is_long_message, start_time)
     else:
         async def g4f_request():
             user_g4f_client = await get_client(user_id, "g4f_client", model_name=model_id)
             return await user_g4f_client.chat.completions.create(model=model_id, messages=user_context["messages"])
-
-        logging.info(f"[{time.strftime('%H:%M:%S')}] Начало запроса к G4F API{' (длинное сообщение)' if is_long_message else ''}")
+ 
         timeout = EXTENDED_API_TIMEOUT if should_bypass_timeout(model_id, "g4f") else DEFAULT_API_TIMEOUT
-        request_func = g4f_request
-
-    try:
-        response = await async_run_with_timeout(request_func, timeout)
-        if response:
-            response_text = response.choices[0].message.content
-            logging.info(f"Запрос к G4F API завершен за {time.time() - start_time:.5f} секунд")
-            if not is_long_message:
-                user_context["messages"].append({"role": "assistant", "content": response_text})
-            return response_text
-    except TimeoutError:
-        logging.error(f"Тайм-аут в g4f запросе{' (длинное сообщение)' if is_long_message else ''}")
-        await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
+        response = await _handle_api_request(message, g4f_request, timeout, "G4F", model_id, is_long_message, start_time)
+ 
+    if response:
+        response_text = response.choices[0].message.content
+        if not is_long_message:
+            user_context["messages"].append({"role": "assistant", "content": response_text})
+        return response_text
     
     return None
 
@@ -302,123 +311,101 @@ async def _process_gemini_message(message, user_context, model_id, message_text,
         
         return response
 
-    logging.info(f"[{time.strftime('%H:%M:%S')}] Начало запроса к Gemini API{' (длинное сообщение)' if is_long_message else ''}")
     timeout = EXTENDED_API_TIMEOUT if should_bypass_timeout(model_id, "gemini") else DEFAULT_API_TIMEOUT
+    response = await _handle_api_request(message, gemini_request, timeout, "Gemini", model_id, is_long_message, start_time)
 
-    try:
-        response = await async_run_with_timeout(gemini_request, timeout)
-        if response:
-            response_text = response.text
-            logging.info(f"Запрос к Gemini API завершен за {time.time() - start_time:.5f} секунд")
-            if not is_long_message:
-                user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
-            return response_text
-    except TimeoutError:
-        logging.error(f"Тайм-аут в gemini_request{' (длинное сообщение)' if is_long_message else ''}")
-        await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
-
+    if response:
+        response_text = response.text
+        if not is_long_message:
+            user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
+        return response_text
+    
     return None
 
 
 async def _process_openai_audio_message(message, user_id, model_id, api_type, encoded_audio, audio_format, start_time):
-    try:
-        client = await get_openai_client(api_type)
-        logging.info("Начало прямого запроса к OpenAI Audio API")
+    client = await get_openai_client(api_type)
+    
+    current_message = [{"role": "user", "content": message.text}] if message.text else [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": encoded_audio, "format": audio_format}}]}]
+    
+    user_context = await load_context(user_id)
+    voice = user_context.get("voice")
+    
+    async def audio_api_request():
+        return await client.chat.completions.create(model=model_id, modalities=["text", "audio"], audio={"voice": voice, "format": "wav"}, messages=current_message, timeout=90)
+    
+    result = await _handle_api_request(message, audio_api_request, AUDIO_API_TIMEOUT, "OpenAI Audio", model_id, False, start_time)
+    
+    if result and result.choices and hasattr(result.choices[0].message, 'audio') and result.choices[0].message.audio:
+        choice = result.choices[0].message
+        response_text = choice.audio.transcript
+        response_audio = await asyncio.to_thread(lambda: base64.b64decode(choice.audio.data))
         
-        current_message = [{"role": "user", "content": message.text}] if message.text else [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": encoded_audio, "format": audio_format}}]}]
+        temp_wav_path = f"temp_audio_{user_id}.wav"
+        async with aiofiles.open(temp_wav_path, "wb") as f:
+            await f.write(response_audio)
         
-        user_context = await load_context(user_id)
-        voice = user_context.get("voice")
+        temp_ogg_path = f"temp_audio_{user_id}.ogg"
+        await asyncio.to_thread(lambda: AudioSegment.from_wav(temp_wav_path).export(temp_ogg_path, format="ogg"))
         
-        async def audio_api_request():
-            return await client.chat.completions.create(model=model_id, modalities=["text", "audio"], audio={"voice": voice, "format": "wav"}, messages=current_message, timeout=90)
+        try:
+             async with aiofiles.open(temp_ogg_path, "rb") as audio_file:
+                audio_data = await audio_file.read()
+                await message.reply_audio(audio=types.BufferedInputFile(audio_data, filename="response.ogg"), caption="🔊 Аудио-ответ")
+        finally:
+            if os.path.exists(temp_wav_path): await aiofiles.os.remove(temp_wav_path)
+            if os.path.exists(temp_ogg_path): await aiofiles.os.remove(temp_ogg_path)
         
-        result = await async_run_with_timeout(audio_api_request, AUDIO_API_TIMEOUT)
+        if user_context.get("show_processing_time", True):
+            processing_time = str(timedelta(seconds=int(time.time() - start_time)))
+            await message.answer(f"⏳ Время обработки запроса: {processing_time}")
         
-        if result and result.choices and hasattr(result.choices[0].message, 'audio') and result.choices[0].message.audio:
-            choice = result.choices[0].message
-            response_text = choice.audio.transcript
-            response_audio = await asyncio.to_thread(lambda: base64.b64decode(choice.audio.data))
-            
-            temp_wav_path = f"temp_audio_{user_id}.wav"
-            async with aiofiles.open(temp_wav_path, "wb") as f:
-                await f.write(response_audio)
-            
-            temp_ogg_path = f"temp_audio_{user_id}.ogg"
-            await asyncio.to_thread(lambda: AudioSegment.from_wav(temp_wav_path).export(temp_ogg_path, format="ogg"))
-            
-            try:
-                 async with aiofiles.open(temp_ogg_path, "rb") as audio_file:
-                    audio_data = await audio_file.read()
-                    await message.reply_audio(audio=types.BufferedInputFile(audio_data, filename="response.ogg"), caption="🔊 Аудио-ответ")
-            finally:
-                if os.path.exists(temp_wav_path): await aiofiles.os.remove(temp_wav_path)
-                if os.path.exists(temp_ogg_path): await aiofiles.os.remove(temp_ogg_path)
-            
-            if user_context.get("show_processing_time", True):
-                processing_time = str(timedelta(seconds=int(time.time() - start_time)))
-                await message.answer(f"⏳ Время обработки запроса: {processing_time}")
-            
-            return response_text
-        else:
-            logging.error("Модель не вернула аудио в ответе или ответ некорректен")
-            await message.reply("🚨 Модель не вернула аудио-ответ или ответ некорректен")
-
-    except TimeoutError:
-        logging.error("Тайм-аут в audio_api_request")
-        await message.reply(f"🕒 Превышено время ожидания ответа ({AUDIO_API_TIMEOUT} сек) от аудио-модели.")
-    except Exception as e:
-        logging.error(f"Ошибка при обработке аудио запроса: {e}")
-        await message.reply("🚨 Ошибка при обработке аудио.")
+        return response_text
+    else:
+        logging.error("Модель не вернула аудио в ответе или ответ некорректен")
+        await message.reply("🚨 Модель не вернула аудио-ответ или ответ некорректен")
         
     return None
 
-async def _process_openai_text_message(message, user_context, model_id, api_type, is_long_message):
+async def _process_openai_text_message(message, user_context, model_id, api_type, is_long_message, start_time):
     timeout = EXTENDED_API_TIMEOUT if should_bypass_timeout(model_id, api_type) else DEFAULT_API_TIMEOUT
-    try:
-        result = await async_run_with_timeout(call_openai_completion_async, timeout, api_type, model_id, user_context["messages"])
-        if result and hasattr(result, "choices") and result.choices:
-            response_text = result.choices[0].message.content
-            if not is_long_message:
-                user_context["messages"].append({"role": "assistant", "content": response_text})
-            return response_text
-        else:
-            logging.error(f"Ответ от {api_type} API не содержит ожидаемых данных: {result}")
-            await message.reply(f"🚨 Ошибка: получен некорректный ответ от {api_type} API.")
-    except TimeoutError:
-        logging.error(f"Тайм-аут в openai_client запросе{' (длинное сообщение)' if is_long_message else ''}")
-        await message.reply(f"🕒 Превышено время ожидания ответа ({timeout} сек). Попробуйте еще раз или выберите другую модель.")
+    
+    async def openai_text_request():
+        return await call_openai_completion_async(api_type, model_id, user_context["messages"])
+
+    result = await _handle_api_request(message, openai_text_request, timeout, f"OpenAI {api_type}", model_id, is_long_message, start_time)
+    
+    if result and hasattr(result, "choices") and result.choices:
+        response_text = result.choices[0].message.content
+        if not is_long_message:
+            user_context["messages"].append({"role": "assistant", "content": response_text})
+        return response_text
+    else:
+        logging.error(f"Ответ от {api_type} API не содержит ожидаемых данных: {result}")
+        await message.reply(f"🚨 Ошибка: получен некорректный ответ от {api_type} API.")
     
     return None
 
-async def _process_anthropic_message(message, user_context, user_id, model_id, api_type, message_text, is_long_message):
-    try:
-        system_content = None
-        if user_context["messages"] and user_context["messages"][0]["role"] == "system":
-            system_content = user_context["messages"][0]["content"]
-        
-        anthropic_messages = [msg for msg in user_context["messages"] if msg["role"] in ["user", "assistant"]]
-        
-        if not anthropic_messages or (anthropic_messages[-1]["role"] != "user" and message_text):
-            anthropic_messages.append({"role": "user", "content": message_text})
+async def _process_anthropic_message(message, user_context, user_id, model_id, api_type, message_text, is_long_message, start_time):
+    system_content = None
+    if user_context["messages"] and user_context["messages"][0]["role"] == "system":
+        system_content = user_context["messages"][0]["content"]
+    
+    anthropic_messages = [msg for msg in user_context["messages"] if msg["role"] in ["user", "assistant"]]
+    
+    if not anthropic_messages or (anthropic_messages[-1]["role"] != "user" and message_text):
+        anthropic_messages.append({"role": "user", "content": message_text})
 
-        result = await async_run_with_timeout(
-            lambda: call_anthropic_completion_sync(api_type, model_id, anthropic_messages, system=system_content),
-            DEFAULT_API_TIMEOUT
-        )
-        
-        if result:
-            response_text = result.content[0].text
-            if not is_long_message:
-                user_context["messages"].append({"role": "assistant", "content": response_text})
-            return response_text
-            
-    except TimeoutError:
-        logging.error("Тайм-аут в Anthropic API запросе")
-        await message.reply(f"🕒 Превышено время ожидания ответа ({DEFAULT_API_TIMEOUT} сек). Попробуйте еще раз или выберите другую модель.")
-    except Exception as e:
-        logging.exception(f"Ошибка при вызове Anthropic API: {e}")
-        await message.reply("❌ Ошибка при обработке запроса.")
+    async def anthropic_request():
+        return await asyncio.to_thread(lambda: call_anthropic_completion_sync(api_type, model_id, anthropic_messages, system=system_content))
+
+    result = await _handle_api_request(message, anthropic_request, DEFAULT_API_TIMEOUT, "Anthropic", model_id, is_long_message, start_time)
+    
+    if result:
+        response_text = result.content[0].text
+        if not is_long_message:
+            user_context["messages"].append({"role": "assistant", "content": response_text})
+        return response_text
         
     return None
 
@@ -429,37 +416,33 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
     response_text = None
     
     # Добавление текущего сообщения в контекст
-    if api_type == "gemini":
-        last_message = user_context["messages"][-1] if user_context["messages"] else None
-        if last_message and last_message["role"] == "user" and any("data" in part for part in last_message.get("parts", [])):
-            last_message["parts"].append({"text": message_text})
-        else:
-            user_context["messages"].append({"role": "user", "parts": [{"text": message_text}]})
-    elif api_type in list(openai_clients.keys()) + ["g4f"]:
-        user_context["messages"].append({"role": "user", "content": message_text})
-
-    try:
-        if api_type == "g4f":
-            response_text = await _process_g4f_message(message, user_context, user_id, model_id, message_text, is_long_message, start_time)
-        elif api_type == "gemini":
-            response_text = await _process_gemini_message(message, user_context, model_id, message_text, is_long_message, start_time)
-        elif api_type in openai_clients:
-            if not is_long_message and model_id == "openai-audio":
-                response_text = await _process_openai_audio_message(message, user_id, model_id, api_type, encoded_audio, audio_format, start_time)
+    if message_text:
+        if api_type == "gemini":
+            last_message = user_context["messages"][-1] if user_context["messages"] else None
+            if last_message and last_message["role"] == "user" and any("data" in part for part in last_message.get("parts", [])):
+                last_message["parts"].append({"text": message_text})
             else:
-                response_text = await _process_openai_text_message(message, user_context, model_id, api_type, is_long_message)
-        elif api_type in anthropic_clients:
-            response_text = await _process_anthropic_message(message, user_context, user_id, model_id, api_type, message_text, is_long_message)
+                user_context["messages"].append({"role": "user", "parts": [{"text": message_text}]})
+        else:
+            # Для других API, используем формат {"role": "user", "content": "..."}
+            user_context["messages"].append({"role": "user", "content": message_text})
 
-        if response_text:
-            response_text = response_text.replace("<think>", "").replace("</think>", "")
-            
-        return response_text
-    
-    except Exception as e:
-        logging.error(f"Ошибка во время запроса к API: {e}")
-        await message.reply("🚨Произошла ошибка.")
-        return None
+    if api_type == "g4f":
+        response_text = await _process_g4f_message(message, user_context, user_id, model_id, message_text, is_long_message, start_time)
+    elif api_type == "gemini":
+        response_text = await _process_gemini_message(message, user_context, model_id, message_text, is_long_message, start_time)
+    elif api_type in openai_clients:
+        if not is_long_message and model_id == "openai-audio":
+            response_text = await _process_openai_audio_message(message, user_id, model_id, api_type, encoded_audio, audio_format, start_time)
+        else:
+            response_text = await _process_openai_text_message(message, user_context, model_id, api_type, is_long_message, start_time)
+    elif api_type in anthropic_clients:
+        response_text = await _process_anthropic_message(message, user_context, user_id, model_id, api_type, message_text, is_long_message, start_time)
+
+    if response_text:
+        response_text = response_text.replace("<think>", "").replace("</think>", "")
+        
+    return response_text
 
 async def send_response(message: types.Message, response_text: str):
     try:
@@ -568,7 +551,7 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
         await message.reply("🔔Режим накопления сообщений отключен, так как не было накопленных сообщений.")
         return
 
-    user_context["long_message"] = ""  # Очищаем сразу
+    user_context["long_message"] = ""
     
     model_key = user_context["model"]
     model_id, api_type = model_key.split('_')
@@ -589,7 +572,6 @@ async def cmd_long_message(message: types.Message, state: FSMContext):
     if response_text:
         await send_response(message, response_text)
         
-        # Обновляем контекст после успешного ответа
         if api_type == "gemini":
             user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
         else:

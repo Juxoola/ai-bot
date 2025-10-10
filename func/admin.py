@@ -12,7 +12,24 @@ from keyboards import (get_api_selection_keyboard,
                        get_image_gen_model_selection_keyboard,
                        get_image_recognition_model_selection_keyboard,
                        get_models_by_api_keyboard)
-                       
+
+
+async def _get_allowed_apis(include_anthropic: bool = True) -> list[str]:
+    """Возвращает список разрешенных API."""
+    apis = list(openai_clients.keys()) + ["gemini", "g4f"]
+    if include_anthropic:
+        apis.extend(list(anthropic_clients.keys()))
+    return apis
+
+
+async def _delete_message_safe(chat_id: int, message_id: int):
+    """Безопасно удаляет сообщение, обрабатывая возможные исключения."""
+    if message_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception as e:
+            logging.error(f"Ошибка при удалении сообщения {message_id} в чате {chat_id}: {e}")
+
 
 async def send_media_message(user_id, message):
     try:
@@ -95,16 +112,15 @@ async def process_new_model_name(message: types.Message, state: FSMContext):
 async def process_new_model_id(message: types.Message, state: FSMContext):
     model_id = message.text
     await state.update_data(new_model_id=model_id)
-    allowed_apis = list(openai_clients.keys()) + list(anthropic_clients.keys()) + ["gemini" , "g4f"]
+    allowed_apis = await _get_allowed_apis()
     available = ", ".join(allowed_apis)
-    await message.reply(f"Введите тип API новой модели для чата {available}:")
+    await message.reply(f"Введите тип API новой модели для чата ({available}):")
     await state.set_state(Form.waiting_for_new_model_api)
 
 async def process_new_model_api(message: types.Message, state: FSMContext):
     model_api = message.text.lower()
 
-
-    allowed_apis = list(openai_clients.keys()) + list(anthropic_clients.keys()) + ["gemini" , "g4f"]
+    allowed_apis = await _get_allowed_apis()
 
     if model_api not in allowed_apis:
         available = ", ".join(allowed_apis)
@@ -148,11 +164,7 @@ async def process_delete_model_name(callback_query: types.CallbackQuery, state: 
 
     data = await state.get_data()
     delete_model_message_id = data.get("delete_model_message_id")
-    if delete_model_message_id:
-        try:
-            await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=delete_model_message_id)
-        except Exception as e:
-            logging.error(f"Ошибка при удалении сообщения: {e}")
+    await _delete_message_safe(callback_query.message.chat.id, delete_model_message_id)
 
     if model_data == "cancel_delete":
         await bot.answer_callback_query(callback_query.id)
@@ -167,7 +179,7 @@ async def process_delete_model_name(callback_query: types.CallbackQuery, state: 
         await state.set_state(Form.waiting_for_message)
         return
 
-    model_id = model_data.split('_')[0]
+    model_id = model_data.split('_', 1)[0]
     api_type = AVAILABLE_MODELS[model_data]['api']
     
     await state.update_data(
@@ -197,11 +209,7 @@ async def process_delete_model_api_selection(callback_query: types.CallbackQuery
     
     data = await state.get_data()
     delete_model_message_id = data.get("delete_model_message_id")
-    if delete_model_message_id:
-        try:
-            await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=delete_model_message_id)
-        except Exception as e:
-            logging.error(f"Ошибка при удалении сообщения: {e}")
+    await _delete_message_safe(callback_query.message.chat.id, delete_model_message_id)
     
     AVAILABLE_MODELS = await av_models()
     keyboard, model_map = await get_models_by_api_keyboard(AVAILABLE_MODELS, selected_api)
@@ -233,11 +241,7 @@ async def process_delete_model_by_api(callback_query: types.CallbackQuery, state
     model_data = model_map[short_id]
 
     delete_model_message_id = data.get("delete_model_message_id")
-    if delete_model_message_id:
-        try:
-            await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=delete_model_message_id)
-        except Exception as e:
-            logging.error(f"Ошибка при удалении сообщения: {e}")
+    await _delete_message_safe(callback_query.message.chat.id, delete_model_message_id)
     
     AVAILABLE_MODELS = await av_models()
     if model_data not in AVAILABLE_MODELS:
@@ -296,15 +300,15 @@ async def cmd_add_image_rec_model(message: types.Message, state: FSMContext):
 async def process_new_image_rec_model_id(message: types.Message, state: FSMContext):
     model_id = message.text
     await state.update_data(new_image_rec_model_id=model_id)
-    allowed_apis = list(openai_clients.keys()) + list(anthropic_clients.keys()) + ["gemini" , "g4f"]
+    allowed_apis = await _get_allowed_apis()
     available = ", ".join(allowed_apis)
-    await message.reply(f"Введите тип API для модели распознавания изображений {available}")
+    await message.reply(f"Введите тип API для модели распознавания изображений ({available})")
     await state.set_state(Form.waiting_for_new_image_rec_model_api)
 
 async def process_new_image_rec_model_api(message: types.Message, state: FSMContext):
-    model_api = message.text.lower() 
+    model_api = message.text.lower()
     
-    allowed_apis = list(openai_clients.keys()) + list(anthropic_clients.keys()) + ["gemini" , "g4f"]
+    allowed_apis = await _get_allowed_apis()
 
     if model_api not in allowed_apis:
         available = ", ".join(allowed_apis)
@@ -365,11 +369,7 @@ async def process_delete_image_rec_model_name(callback_query: types.CallbackQuer
     model_key = model_map[short_id]
     
     delete_image_rec_model_message_id = data.get("delete_image_rec_model_message_id")
-    if delete_image_rec_model_message_id:
-        try:
-            await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=delete_image_rec_model_message_id)
-        except Exception as e:
-            logging.error(f"Ошибка при удалении сообщения выбора модели для удаления: {e}")
+    await _delete_message_safe(callback_query.message.chat.id, delete_image_rec_model_message_id)
 
     IMAGE_RECOGNITION_MODELS = await rec_models()
     if model_key not in IMAGE_RECOGNITION_MODELS:
@@ -430,15 +430,15 @@ async def cmd_add_image_gen_model(message: types.Message, state: FSMContext):
 async def process_new_image_gen_model_id(message: types.Message, state: FSMContext):
     model_id = message.text
     await state.update_data(new_image_gen_model_id=model_id)
-    allowed_apis = list(openai_clients.keys()) + ["gemini", "g4f"]
+    allowed_apis = await _get_allowed_apis(include_anthropic=False)
     available = ", ".join(allowed_apis)
-    await message.reply(f"Введите тип API для модели генерации изображений {available}")
+    await message.reply(f"Введите тип API для модели генерации изображений ({available})")
     await state.set_state(Form.waiting_for_new_image_gen_model_api)
 
 async def process_new_image_gen_model_api(message: types.Message, state: FSMContext):
-    model_api = message.text.lower() 
+    model_api = message.text.lower()
     
-    allowed_apis = list(openai_clients.keys()) + ["gemini", "g4f"]
+    allowed_apis = await _get_allowed_apis(include_anthropic=False)
 
     if model_api not in allowed_apis:
         available = ", ".join(allowed_apis)
@@ -499,11 +499,7 @@ async def process_delete_image_gen_model_name(callback_query: types.CallbackQuer
     model_key = model_map[short_id]
 
     delete_image_gen_model_message_id = data.get("delete_image_gen_model_message_id")
-    if delete_image_gen_model_message_id:
-        try:
-            await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=delete_image_gen_model_message_id)
-        except Exception as e:
-            logging.error(f"Ошибка при удалении сообщения выбора модели для удаления: {e}")
+    await _delete_message_safe(callback_query.message.chat.id, delete_image_gen_model_message_id)
 
     model_id, api = model_key.split('_', 1)
     
