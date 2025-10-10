@@ -13,12 +13,12 @@ from aiogram.fsm.context import FSMContext
 from config import Form, bot, gemini_client, get_client, openai_clients
 from database import def_aspect, def_enhance, def_gen_model, load_context
 from deep_translator import GoogleTranslator
-from func.messages import async_run_with_timeout
 from google.genai import types as genai_types
 from handlers.check import check_in_progress
 from PIL import Image
 
-from .messages import DEFAULT_API_TIMEOUT, calculate_and_show_processing_time
+from .utils import (async_run_with_timeout,
+                    calculate_and_show_processing_time, DEFAULT_API_TIMEOUT)
 
 new_api_models = ["flux", "turbo"]
 fresed_models = ["stable-diffusion-3", "stable-diffusion-3-large", "stable-diffusion-3-large-turbo", "flux-pro-1.1", "flux-pro-1"]

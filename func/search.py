@@ -15,9 +15,8 @@ from duckduckgo_search import DDGS
 from func.messages import call_anthropic_completion_sync, send_message_in_parts
 from google.genai import types as genai_types
 
-from .messages import (DEFAULT_API_TIMEOUT, async_run_with_timeout,
-                       call_openai_completion_async)
-
+from .messages import (call_openai_completion_async)
+from .utils import (DEFAULT_API_TIMEOUT, async_run_with_timeout,)
 
 class SearchResults():
     def __init__(self, results: list, used_words: int):

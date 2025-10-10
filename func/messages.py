@@ -6,7 +6,7 @@ import re
 import tempfile
 import time
 from datetime import timedelta
-
+import json
 import aiofiles
 import aiofiles.os
 from aiogram import types
@@ -19,10 +19,13 @@ from database import is_admin, load_context, save_context, trim_context
 from func.decorators import rate_limit
 from google.genai import types as genai_types
 from pydub import AudioSegment
+from func.image_gen import process_image_generation_prompt 
+from .utils import (async_run_with_timeout,
+                    calculate_and_show_processing_time, DEFAULT_API_TIMEOUT,
+                    AUDIO_API_TIMEOUT, EXTENDED_API_TIMEOUT)
 
-DEFAULT_API_TIMEOUT = 60
-AUDIO_API_TIMEOUT = 120
-EXTENDED_API_TIMEOUT = 240
+from handlers.check import clear_in_progress
+
 
 # Список Markdown-символов, которые нужно отслеживать
 MARKDOWN_SYMBOLS = ['**', '__', '*', '_', '```', '`']
@@ -220,19 +223,6 @@ async def _handle_api_request(message, request_func, timeout, api_name, model_id
 
 MAX_MESSAGE_LENGTH = 4050
 
-async def calculate_and_show_processing_time(message, user_context, start_time):
-    end_time = time.time()
-    processing_time = end_time - start_time
-    formatted_processing_time = str(timedelta(seconds=int(processing_time)))
-    
-    service_info = f"⏳ Время обработки запроса: {formatted_processing_time}"
-    
-    if user_context.get("show_processing_time", True):
-        await message.answer(service_info)
-    
-    logging.info(f"Общее время обработки сообщения: {processing_time:.5f} секунд")
-    
-    return formatted_processing_time
 
 async def process_audio_async(ogg_bytes: bytes) -> bytes:
     temp_ogg_path = None
@@ -297,30 +287,72 @@ async def _process_g4f_message(message, user_context, user_id, model_id, message
     
     return None
 
-async def _process_gemini_message(message, user_context, model_id, message_text, is_long_message, start_time):
+async def _process_gemini_message(message: types.Message, state: FSMContext, user_context: dict, model_id: str, message_text, is_long_message: bool, start_time: float):
+    image_tool = genai_types.Tool(
+        function_declarations=[genai_types.FunctionDeclaration(**gemini_image_generation_tool)]
+    )
+
     async def gemini_request():
-        system_instruction = next((msg["parts"][0].get("text", "") for msg in user_context["messages"] if msg["role"] == "system" and msg.get("parts")), None)
-        history_for_model = [msg for msg in user_context["messages"] if msg["role"] != "system"]
+        system_instruction = next((msg["parts"][0].get("text", "") for msg in user_context["messages"] if msg.get("role") == "system" and msg.get("parts")), None)
+        
+        history_for_model = [msg for msg in user_context["messages"] if msg.get("role") != "system"]
         
         if not system_instruction:
             system_instruction = DEFAULT_SYSTEM_PROMPTS.get("default")
 
-        config = genai_types.GenerateContentConfig(system_instruction=system_instruction) if system_instruction else None
+        config = genai_types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=[image_tool]
+        )
         
-        response = await gemini_client.aio.models.generate_content(model=model_id, contents=history_for_model, config=config)
-        
-        return response
+        return await gemini_client.aio.models.generate_content(
+            model=model_id,
+            contents=history_for_model,
+            config=config
+        )
 
     timeout = EXTENDED_API_TIMEOUT if should_bypass_timeout(model_id, "gemini") else DEFAULT_API_TIMEOUT
     response = await _handle_api_request(message, gemini_request, timeout, "Gemini", model_id, is_long_message, start_time)
 
-    if response:
-        response_text = response.text
-        if not is_long_message:
-            user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
-        return response_text
-    
-    return None
+    if not response:
+        return None
+
+    try:
+        part = response.candidates[0].content.parts[0]
+        if hasattr(part, 'function_call') and part.function_call:
+            function_call = part.function_call
+            
+            if function_call.name == 'generate_image':
+                logging.info(f"Gemini модель запросила вызов функции: {function_call.name}")
+                
+                image_prompt = function_call.args.get('prompt')
+
+                if image_prompt:
+                    await clear_in_progress(state, message)
+                    
+                    await message.reply("🎨 Отличная идея! Начинаю рисовать...")
+                    
+                    await state.update_data(image_generation_prompt=image_prompt, is_direct_image_gen=True)
+                    
+                    await process_image_generation_prompt(message, state)
+
+                    model_response_content = response.candidates[0].content
+                    user_context["messages"].append({
+                        "role": "model",  
+                        "parts": [part for part in model_response_content.parts]
+                    })
+
+                    return None
+                else:
+                    logging.warning("Gemini модель вызвала generate_image без промпта.")
+                    return "Модель попыталась сгенерировать изображение, но не указала, что именно рисовать."
+    except (IndexError, AttributeError) as e:
+        logging.warning(f"Не удалось проверить наличие function_call в ответе Gemini: {e}")
+
+    response_text = response.text
+    if not is_long_message:
+        user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
+    return response_text
 
 
 async def _process_openai_audio_message(message, user_id, model_id, api_type, encoded_audio, audio_format, start_time):
@@ -367,24 +399,98 @@ async def _process_openai_audio_message(message, user_id, model_id, api_type, en
         
     return None
 
-async def _process_openai_text_message(message, user_context, model_id, api_type, is_long_message, start_time):
+async def _process_openai_text_message(message: types.Message, state: FSMContext, user_context: dict, model_id: str, api_type: str, is_long_message: bool, start_time: float):
+
     timeout = EXTENDED_API_TIMEOUT if should_bypass_timeout(model_id, api_type) else DEFAULT_API_TIMEOUT
     
     async def openai_text_request():
-        return await call_openai_completion_async(api_type, model_id, user_context["messages"])
+        return await call_openai_completion_async(
+            api_type=api_type, 
+            model=model_id, 
+            messages=user_context["messages"],
+            tools=[image_generation_tool],
+            tool_choice="auto" 
+        )
 
     result = await _handle_api_request(message, openai_text_request, timeout, f"OpenAI {api_type}", model_id, is_long_message, start_time)
     
-    if result and hasattr(result, "choices") and result.choices:
-        response_text = result.choices[0].message.content
-        if not is_long_message:
-            user_context["messages"].append({"role": "assistant", "content": response_text})
-        return response_text
-    else:
+    if not (result and hasattr(result, "choices") and result.choices):
         logging.error(f"Ответ от {api_type} API не содержит ожидаемых данных: {result}")
         await message.reply(f"🚨 Ошибка: получен некорректный ответ от {api_type} API.")
+        return None
+
+    response_message = result.choices[0].message
+
+    if response_message.tool_calls:
+        tool_call = response_message.tool_calls[0]
+        function_name = tool_call.function.name
+        
+        if function_name == "generate_image":
+            logging.info(f"Модель запросила вызов функции: {function_name}")
+            
+            try:
+                arguments = json.loads(tool_call.function.arguments)
+                image_prompt = arguments.get("prompt")
+            except json.JSONDecodeError as e:
+                logging.error(f"Ошибка декодирования аргументов функции: {e}")
+                await message.reply("🚨 Произошла ошибка при обработке запроса от модели.")
+                return None
+
+            if image_prompt:
+                await message.reply("🎨 Отличная идея! Начинаю рисовать...")
+                await clear_in_progress(state, message)
+                await state.update_data(image_generation_prompt=image_prompt, is_direct_image_gen=True)
+                
+                await process_image_generation_prompt(message, state)
+
+                message_dict = response_message.model_dump()
+                user_context["messages"].append(message_dict)
+                
+                tool_response_message = {
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": "Изображение было успешно сгенерировано и отправлено пользователю.", 
+                }
+                user_context["messages"].append(tool_response_message)
+
+                # tool_response_message = {
+                #     "tool_call_id": tool_call.id,
+                #     "role": "tool",
+                #     "name": function_name,
+                #     "content": "Изображение было успешно сгенерировано и отправлено пользователю.",
+                # }
+                
+                # user_context["messages"].append(tool_response_message)
+                
+                # logging.info("Отправка результата работы инструмента обратно модели для получения финального ответа.")
+                # async def get_final_response_request():
+                #     return await call_openai_completion_async(
+                #         api_type=api_type, 
+                #         model=model_id, 
+                #         messages=user_context["messages"],
+                #     )
+
+                # final_result = await _handle_api_request(message, get_final_response_request, timeout, f"OpenAI {api_type} (final response)", model_id, is_long_message, start_time)
+                
+                # if final_result and hasattr(final_result, "choices") and final_result.choices:
+                #     final_response_text = final_result.choices[0].message.content
+                #     if final_response_text:
+                #          user_context["messages"].append({"role": "assistant", "content": final_response_text})
+                #     return final_response_text
+                # else:
+                #     return None
+                
+                return None
+            else:
+                logging.warning("Модель вызвала generate_image без промпта.")
+                return "Модель попыталась сгенерировать изображение, но не указала, что именно рисовать. Попробуйте еще раз."
+
+    response_text = response_message.content
+    if not is_long_message and response_text:
+        user_context["messages"].append({"role": "assistant", "content": response_text})
     
-    return None
+    return response_text
 
 async def _process_anthropic_message(message, user_context, user_id, model_id, api_type, message_text, is_long_message, start_time):
     system_content = None
@@ -409,7 +515,8 @@ async def _process_anthropic_message(message, user_context, user_id, model_id, a
         
     return None
 
-async def process_message(message: types.Message, user_context, user_id, api_type, model_id, message_text, start_time=None, audio_data=None, audio_format=None, encoded_audio=None, is_long_message=False):
+async def process_message(message: types.Message, state: FSMContext, user_context, user_id, api_type, model_id, message_text, start_time=None, audio_data=None, audio_format=None, encoded_audio=None, is_long_message=False):
+
     if start_time is None:
         start_time = time.time()
     
@@ -429,12 +536,12 @@ async def process_message(message: types.Message, user_context, user_id, api_typ
     if api_type == "g4f":
         response_text = await _process_g4f_message(message, user_context, user_id, model_id, message_text, is_long_message, start_time)
     elif api_type == "gemini":
-        response_text = await _process_gemini_message(message, user_context, model_id, message_text, is_long_message, start_time)
+        response_text = await _process_gemini_message(message, state, user_context, model_id, message_text, is_long_message, start_time)
     elif api_type in openai_clients:
         if not is_long_message and model_id == "openai-audio":
             response_text = await _process_openai_audio_message(message, user_id, model_id, api_type, encoded_audio, audio_format, start_time)
         else:
-            response_text = await _process_openai_text_message(message, user_context, model_id, api_type, is_long_message, start_time)
+            response_text = await _process_openai_text_message(message, state, user_context, model_id, api_type, is_long_message, start_time)
     elif api_type in anthropic_clients:
         response_text = await _process_anthropic_message(message, user_context, user_id, model_id, api_type, message_text, is_long_message, start_time)
 
@@ -449,7 +556,7 @@ async def send_response(message: types.Message, response_text: str):
             await send_message_in_parts(message, response_text, MAX_MESSAGE_LENGTH)
             # Дополнительно отправляем ответ в виде текстового файла для длинных сообщений
             with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".txt", encoding='utf-8') as temp_file:
-                await aiofiles.os.remove(temp_file.name) # aiofiles requires this
+                await aiofiles.os.remove(temp_file.name)
                 async with aiofiles.open(temp_file.name, "w+", encoding='utf-8') as f:
                     await f.write(response_text)
                 temp_file_path = temp_file.name
@@ -524,12 +631,47 @@ async def handle_all_messages(message: types.Message, state: FSMContext, audio_r
 
     message_text = message.text or ""
     
-    response_text = await process_message(message=message, user_context=user_context, user_id=user_id, api_type=api_type, model_id=model_id, message_text=message_text, start_time=start_time, audio_data=audio_data, audio_format=audio_format, encoded_audio=encoded_audio)
+    response_text = await process_message(message=message, state=state, user_context=user_context, user_id=user_id, api_type=api_type, model_id=model_id, message_text=message_text, start_time=start_time, audio_data=audio_data, audio_format=audio_format, encoded_audio=encoded_audio)
     
     if response_text:
-        await send_response(message, response_text)
-        await save_context(user_id, user_context)
-        await calculate_and_show_processing_time(message, user_context, start_time)
+            await send_response(message, response_text)
+            await save_context(user_id, user_context)
+            await calculate_and_show_processing_time(message, user_context, start_time)
+
+
+
+image_generation_tool = {
+    "type": "function",
+    "function": {
+        "name": "generate_image",
+        "description": "Создает изображение на основе текстового описания. Использовать, когда пользователь просит нарисовать, сгенерировать, создать или показать изображение.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Детальное, творческое описание изображения для генерации. Должно быть на английском языке для лучших результатов."
+                }
+            },
+            "required": ["prompt"]
+        }
+    }
+}
+
+gemini_image_generation_tool = {
+    "name": "generate_image",
+    "description": "Создает изображение на основе текстового описания. Использовать, когда пользователь просит нарисовать, сгенерировать, создать или показать изображение.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "Детальное, творческое описание изображения для генерации. Для лучших результатов должно быть на английском языке и содержать как можно больше деталей о стиле, объектах и окружении."
+            }
+        },
+        "required": ["prompt"]
+    }
+}
 
 @rate_limit
 async def cmd_long_message(message: types.Message, state: FSMContext):
@@ -635,32 +777,3 @@ def call_anthropic_completion_sync(api_type, model, messages, system=None, **kwa
         logging.error(f"[{end_timestamp}] Ошибка при выполнении запроса к Anthropic API ({api_type}) с моделью {model} после {duration:.2f} секунд: {e}")
         raise
 
-async def async_run_with_timeout(func, timeout, *args, **kwargs):
-    try:
-        if asyncio.iscoroutinefunction(func):
-            task = asyncio.create_task(func(*args, **kwargs))
-            try:
-                return await asyncio.wait_for(task, timeout=timeout)
-            except asyncio.TimeoutError:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                raise TimeoutError(f"Вызов функции превысил таймаут {timeout} сек.")
-        else:
-            loop = asyncio.get_running_loop()
-            
-            future = loop.run_in_executor(None, lambda: func(*args, **kwargs))
-            try:
-                return await asyncio.wait_for(future, timeout=timeout)
-            except asyncio.TimeoutError:
-                future.cancel()
-                try:
-                    await future
-                except asyncio.CancelledError:
-                    pass
-                raise TimeoutError(f"Вызов функции превысил таймаут {timeout} сек.")
-            
-    except asyncio.TimeoutError:
-        raise TimeoutError(f"Вызов функции превысил таймаут {timeout} сек.")

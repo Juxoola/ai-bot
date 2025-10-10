@@ -9,10 +9,10 @@ from aiogram.fsm.context import FSMContext
 from config import Form, bot
 from database import load_context, save_context
 
-from .messages import (DEFAULT_API_TIMEOUT, async_run_with_timeout,
-                       calculate_and_show_processing_time,
-                       call_openai_completion_async)
+from .messages import (call_openai_completion_async)
 
+from .utils import (async_run_with_timeout,
+                    calculate_and_show_processing_time, DEFAULT_API_TIMEOUT)
 
 async def process_image_with_openai(message: types.Message, state: FSMContext, prompt: str):
     start_time = time.time()

@@ -31,25 +31,6 @@ async def get_default_settings_values():
         "AVAILABLE_MODELS": await av_models(),
     }
 
-async def update_system_message(messages, api_type, system_prompt):
-    system_message_found = False
-    for i, msg in enumerate(messages):
-        if msg["role"] == "system":
-            if api_type == "gemini" and "parts" in msg:
-                messages[i] = {"role": "system", "parts": [{"text": system_prompt}]}
-                system_message_found = True
-                break
-            elif api_type != "gemini" and "content" in msg:
-                messages[i] = {"role": "system", "content": system_prompt}
-                system_message_found = True
-                break
-    if not system_message_found:
-        if api_type == "gemini":
-            messages.insert(0, {"role": "system", "parts": [{"text": system_prompt}]})
-        else:
-            messages.insert(0, {"role": "system", "content": system_prompt})
-    return messages
-
 async def _edit_message_reply_markup(callback_query: types.CallbackQuery, text: str, reply_markup: types.InlineKeyboardMarkup):
     await bot.edit_message_text(
         text,
@@ -252,8 +233,11 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
         
         system_role = user_context.get("system_role", "default")
         system_prompt = DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"])
-        
-        user_context["messages"] = await update_system_message(user_context.get("messages", []), new_api_type, system_prompt)
+
+        if new_api_type == "gemini":
+            initial_messages = [{"role": "system", "parts": [{"text": system_prompt}]}]
+        else:
+            initial_messages = [{"role": "system", "content": system_prompt}]
             
         if new_api_type == "g4f":
             model_name = model_key.replace("_g4f", "")
@@ -268,6 +252,7 @@ async def model_selection_handler(callback_query: types.CallbackQuery, state: FS
         user_context.update({
             "model": model_key,
             "api_type": new_api_type,
+            "messages": initial_messages,
             "g4f_image": None,
             "g4f_image_base64": None,
             "long_message": ""
@@ -357,8 +342,29 @@ async def role_selection_handler(callback_query: types.CallbackQuery, state: FSM
     
     user_context["system_role"] = selected_role
     
-    system_prompt = DEFAULT_SYSTEM_PROMPTS.get(selected_role, DEFAULT_SYSTEM_PROMPTS["default"])
-    user_context["messages"] = await update_system_message(user_context.get("messages", []), api_type, system_prompt)
+
+    if api_type == "gemini":
+        system_prompt = DEFAULT_SYSTEM_PROMPTS.get(selected_role, DEFAULT_SYSTEM_PROMPTS["default"])
+        system_message_found = False
+        for i, msg in enumerate(user_context["messages"]):
+            if msg["role"] == "system" and "parts" in msg:
+                user_context["messages"][i] = {"role": "system", "parts": [{"text": system_prompt}]}
+                system_message_found = True
+                break
+        
+        if not system_message_found:
+            user_context["messages"].insert(0, {"role": "system", "parts": [{"text": system_prompt}]})
+    else:
+        system_prompt = DEFAULT_SYSTEM_PROMPTS.get(selected_role, DEFAULT_SYSTEM_PROMPTS["default"])
+        system_message_found = False
+        for i, msg in enumerate(user_context["messages"]):
+            if msg["role"] == "system" and "content" in msg:
+                user_context["messages"][i] = {"role": "system", "content": system_prompt}
+                system_message_found = True
+                break
+        
+        if not system_message_found:
+            user_context["messages"].insert(0, {"role": "system", "content": system_prompt})
     
     await update_setting_and_refresh_keyboard(callback_query, state, user_context)
     
