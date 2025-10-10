@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from config import (DEFAULT_SYSTEM_PROMPTS, Form, anthropic_clients,
                     gemini_client, get_client, openai_clients)
 from database import load_context, save_context
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from func.messages import call_anthropic_completion_sync, send_message_in_parts
 from google.genai import types as genai_types
 
@@ -127,7 +127,7 @@ async def search(query: str, max_results: int = 5, max_words: int = 2500, backen
                     safesearch="moderate",
                     timelimit="y",
                     max_results=max_results,
-                    backend=backend,
+                    backend="bing",
                 ):
                 if ".google." in result["href"]:
                     continue

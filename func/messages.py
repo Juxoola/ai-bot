@@ -20,6 +20,7 @@ from func.decorators import rate_limit
 from google.genai import types as genai_types
 from pydub import AudioSegment
 from func.image_gen import process_image_generation_prompt 
+from func.tools import search_tool
 from .utils import (async_run_with_timeout,
                     calculate_and_show_processing_time, DEFAULT_API_TIMEOUT,
                     AUDIO_API_TIMEOUT, EXTENDED_API_TIMEOUT)
@@ -289,7 +290,10 @@ async def _process_g4f_message(message, user_context, user_id, model_id, message
 
 async def _process_gemini_message(message: types.Message, state: FSMContext, user_context: dict, model_id: str, message_text, is_long_message: bool, start_time: float):
     image_tool = genai_types.Tool(
-        function_declarations=[genai_types.FunctionDeclaration(**gemini_image_generation_tool)]
+        function_declarations=[
+            genai_types.FunctionDeclaration(**gemini_image_generation_tool),
+            genai_types.FunctionDeclaration(**gemini_search_web_tool)
+        ]
     )
 
     async def gemini_request():
@@ -338,7 +342,7 @@ async def _process_gemini_message(message: types.Message, state: FSMContext, use
 
                     model_response_content = response.candidates[0].content
                     user_context["messages"].append({
-                        "role": "model",  
+                        "role": "model",
                         "parts": [part for part in model_response_content.parts]
                     })
 
@@ -346,6 +350,32 @@ async def _process_gemini_message(message: types.Message, state: FSMContext, use
                 else:
                     logging.warning("Gemini модель вызвала generate_image без промпта.")
                     return "Модель попыталась сгенерировать изображение, но не указала, что именно рисовать."
+            elif function_call.name == 'search_web':
+                logging.info(f"Gemini модель запросила вызов функции: {function_call.name}")
+                
+                search_query = function_call.args.get('query')
+                if search_query:
+                    search_results = await search_tool(search_query)
+                    
+                    function_response = genai_types.Part(
+                        function_response=genai_types.FunctionResponse(
+                            name='search_web',
+                            response={'results': search_results}
+                        )
+                    )
+                    
+                    response = await gemini_client.aio.models.generate_content(
+                        model=model_id,
+                        contents=[*user_context["messages"], response.candidates[0].content, function_response],
+                        config=response.prompt_feedback
+                    )
+                    
+                    response_text = response.text
+                    user_context["messages"].append({"role": "model", "parts": [{"text": response_text}]})
+                    return response_text
+                else:
+                    logging.warning("Gemini модель вызвала search_web без запроса.")
+                    return "Модель попыталась выполнить поиск, но не указала, что именно искать."
     except (IndexError, AttributeError) as e:
         logging.warning(f"Не удалось проверить наличие function_call в ответе Gemini: {e}")
 
@@ -408,8 +438,8 @@ async def _process_openai_text_message(message: types.Message, state: FSMContext
             api_type=api_type, 
             model=model_id, 
             messages=user_context["messages"],
-            tools=[image_generation_tool],
-            tool_choice="auto" 
+            tools=[image_generation_tool, search_web_tool],
+            tool_choice="auto"
         )
 
     result = await _handle_api_request(message, openai_text_request, timeout, f"OpenAI {api_type}", model_id, is_long_message, start_time)
@@ -450,41 +480,58 @@ async def _process_openai_text_message(message: types.Message, state: FSMContext
                     "tool_call_id": tool_call.id,
                     "role": "tool",
                     "name": function_name,
-                    "content": "Изображение было успешно сгенерировано и отправлено пользователю.", 
+                    "content": "Изображение было успешно сгенерировано и отправлено пользователю.",
                 }
                 user_context["messages"].append(tool_response_message)
-
-                # tool_response_message = {
-                #     "tool_call_id": tool_call.id,
-                #     "role": "tool",
-                #     "name": function_name,
-                #     "content": "Изображение было успешно сгенерировано и отправлено пользователю.",
-                # }
-                
-                # user_context["messages"].append(tool_response_message)
-                
-                # logging.info("Отправка результата работы инструмента обратно модели для получения финального ответа.")
-                # async def get_final_response_request():
-                #     return await call_openai_completion_async(
-                #         api_type=api_type, 
-                #         model=model_id, 
-                #         messages=user_context["messages"],
-                #     )
-
-                # final_result = await _handle_api_request(message, get_final_response_request, timeout, f"OpenAI {api_type} (final response)", model_id, is_long_message, start_time)
-                
-                # if final_result and hasattr(final_result, "choices") and final_result.choices:
-                #     final_response_text = final_result.choices[0].message.content
-                #     if final_response_text:
-                #          user_context["messages"].append({"role": "assistant", "content": final_response_text})
-                #     return final_response_text
-                # else:
-                #     return None
                 
                 return None
             else:
                 logging.warning("Модель вызвала generate_image без промпта.")
                 return "Модель попыталась сгенерировать изображение, но не указала, что именно рисовать. Попробуйте еще раз."
+        elif function_name == "search_web":
+            logging.info(f"Модель запросила вызов функции: {function_name}")
+            
+            try:
+                arguments = json.loads(tool_call.function.arguments)
+                search_query = arguments.get("query")
+            except json.JSONDecodeError as e:
+                logging.error(f"Ошибка декодирования аргументов функции: {e}")
+                await message.reply("🚨 Произошла ошибка при обработке запроса от модели.")
+                return None
+
+            if search_query:
+                search_results = await search_tool(search_query)
+                
+                message_dict = response_message.model_dump()
+                user_context["messages"].append(message_dict)
+                
+                tool_response_message = {
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": search_results,
+                }
+                user_context["messages"].append(tool_response_message)
+                
+                async def get_final_response_request():
+                    return await call_openai_completion_async(
+                        api_type=api_type,
+                        model=model_id,
+                        messages=user_context["messages"],
+                    )
+
+                final_result = await _handle_api_request(message, get_final_response_request, timeout, f"OpenAI {api_type} (final response)", model_id, is_long_message, start_time)
+                
+                if final_result and hasattr(final_result, "choices") and final_result.choices:
+                    final_response_text = final_result.choices[0].message.content
+                    if final_response_text:
+                         user_context["messages"].append({"role": "assistant", "content": final_response_text})
+                    return final_response_text
+                else:
+                    return None
+            else:
+                logging.warning("Модель вызвала search_web без запроса.")
+                return "Модель попыталась выполнить поиск, но не указала, что именно искать."
 
     response_text = response_message.content
     if not is_long_message and response_text:
@@ -670,6 +717,39 @@ gemini_image_generation_tool = {
             }
         },
         "required": ["prompt"]
+    }
+}
+
+search_web_tool = {
+    "type": "function",
+    "function": {
+        "name": "search_web",
+        "description": "Выполняет веб-поиск с использованием DuckDuckGo для получения актуальной информации или поиска ответов на вопросы, требующие свежих данных.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Поисковый запрос. Должен быть максимально точным и информативным."
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}
+
+gemini_search_web_tool = {
+    "name": "search_web",
+    "description": "Выполняет веб-поиск для получения актуальной информации.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Поисковый запрос."
+            }
+        },
+        "required": ["query"]
     }
 }
 
