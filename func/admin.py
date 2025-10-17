@@ -210,7 +210,8 @@ async def process_delete_model_api_selection(callback_query: types.CallbackQuery
     await _delete_message_safe(callback_query.message.chat.id, delete_model_message_id)
     
     AVAILABLE_MODELS = await av_models()
-    keyboard, model_map = await get_models_by_api_keyboard(AVAILABLE_MODELS, selected_api)
+    recognition_models = await rec_models()
+    keyboard, model_map = await get_models_by_api_keyboard(AVAILABLE_MODELS, selected_api, recognition_models)
     
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_delete")])
     
@@ -278,15 +279,20 @@ async def process_confirm_delete(callback_query: types.CallbackQuery, state: FSM
 
     if confirmation == "yes":
         async with aiosqlite.connect(DATABASE_FILE) as db:
-            await db.execute("DELETE FROM models WHERE model_id = ? AND api = ?", 
+            await db.execute("DELETE FROM models WHERE model_id = ? AND api = ?",
                            (model_id, model_api))
+            
+            await db.execute("DELETE FROM image_recognition_models WHERE model_id = ? AND api = ?",
+                           (model_id, model_api))
+            
             await db.commit()
 
         await init_av_models()
-        await bot.send_message(callback_query.from_user.id, 
+        await init_rec_models()
+        await bot.send_message(callback_query.from_user.id,
                              f"Модель '{model_name}' успешно удалена для чата!")
     else:
-        await bot.send_message(callback_query.from_user.id, 
+        await bot.send_message(callback_query.from_user.id,
                              "Удаление модели для чата отменено.")
 
     await state.set_state(Form.waiting_for_message)
