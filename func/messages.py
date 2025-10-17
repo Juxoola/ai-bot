@@ -437,7 +437,7 @@ async def _process_openai_text_message(message: types.Message, state: FSMContext
     async def openai_text_request():
         return await call_openai_completion_async(
             api_type=api_type, 
-            model=model_id, 
+            model=model_id,
             messages=user_context["messages"],
             tools=[image_generation_tool, search_web_tool],
             tool_choice="auto"

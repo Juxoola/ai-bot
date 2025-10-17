@@ -11,7 +11,7 @@ import aiohttp
 import aiosqlite
 from cachetools import TTLCache
 from config import (DEFAULT_SYSTEM_PROMPTS, providers_config,
-                    update_image_gen_client, update_user_clients)
+                    update_image_gen_client, update_user_clients, get_system_prompt_with_date)
 from key import ADMIN_USER_ID, ALLOWED_USER_IDS
 
 AVAILABLE_MODELS = None
@@ -294,7 +294,7 @@ async def clear_all_user_contexts():
         update_params = []
         for user_id, api_type, system_role in user_data:
             system_role = system_role or "default"
-            system_prompt = DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"])
+            system_prompt = get_system_prompt_with_date(DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"]))
             
             if api_type == "gemini":
                 messages = json.dumps([{"role": "system", "parts": [{"text": system_prompt}]}])
@@ -326,7 +326,7 @@ async def reset_user_context(user_id):
             api_type, system_role = row
             system_role = system_role or "default"
         
-        system_prompt = DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"])
+        system_prompt = get_system_prompt_with_date(DEFAULT_SYSTEM_PROMPTS.get(system_role, DEFAULT_SYSTEM_PROMPTS["default"]))
         if api_type == "gemini":
             messages = json.dumps([{"role": "system", "parts": [{"text": system_prompt}]}])
         else:
@@ -352,9 +352,9 @@ async def _create_default_context(db, user_id):
     api_type = model_row[1] if model_row else AVAILABLE_MODELS[f"{DEFAULT_MODEL}_poli"]["api"]
 
     if api_type == "gemini":
-        system_message = [{"role": "system", "parts": [{"text": DEFAULT_SYSTEM_PROMPTS["default"]}]}]
+        system_message = [{"role": "system", "parts": [{"text": get_system_prompt_with_date(DEFAULT_SYSTEM_PROMPTS["default"])}]}]
     else:
-        system_message = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPTS["default"]}]
+        system_message = [{"role": "system", "content": get_system_prompt_with_date(DEFAULT_SYSTEM_PROMPTS["default"])}]
 
     context = {
         "model": f"{model_id}_{api_type}", "messages": system_message, "api_type": api_type,
@@ -403,9 +403,8 @@ async def load_context(user_id):
 
 async def save_context(user_id, context):
     cache_key = f"context_{user_id}"
-    if cache_key in user_context_cache:
-        del user_context_cache[cache_key]
-    
+    user_context_cache[cache_key] = context  # Обновляем кэш сразу
+
     async with get_db_connection() as db:
         async with db.cursor() as cursor:
             try:
@@ -418,15 +417,15 @@ async def save_context(user_id, context):
                         context_to_save["g4f_image"].getvalue()
                     ).decode("utf-8")
                 
-                messages_json = json.dumps(context_to_save["messages"], 
-                                          ensure_ascii=False, 
+                messages_json = json.dumps(context_to_save["messages"],
+                                          ensure_ascii=False,
                                           separators=(',', ':'))
                 await cursor.execute(
                     """
                     INSERT INTO user_contexts (
                         user_id, model, messages, api_type, g4f_image_base64,
-                        long_message, image_generation_model, 
-                        aspect_ratio, enhance, show_processing_time, 
+                        long_message, image_generation_model,
+                        aspect_ratio, enhance, show_processing_time,
                         voice, system_role
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
@@ -444,7 +443,7 @@ async def save_context(user_id, context):
                     """,
                     (
                         user_id,
-                        model_id, 
+                        model_id,
                         messages_json,
                         context_to_save["api_type"],
                         g4f_image_base64,
@@ -459,9 +458,10 @@ async def save_context(user_id, context):
                 )
                 await db.commit()
                 
-                user_context_cache[cache_key] = context
-                
             except Exception as e:
+                # В случае ошибки в БД, удаляем ключ из кэша, чтобы избежать рассинхронизации
+                if cache_key in user_context_cache:
+                    del user_context_cache[cache_key]
                 await db.rollback()
                 logging.error(f"Ошибка сохранения контекста для пользователя {user_id}: {e}")
                 raise e
@@ -675,22 +675,18 @@ async def gen_models():
     return IMAGE_GENERATION_MODELS
 
 async def rec_models():
-    try:
-        async with get_db_connection() as db:
-            models = {}
-            async with db.execute("SELECT model_id, api FROM image_recognition_models") as cursor:
-                async for row in cursor:
-                    model_id = row[0]
-                    api = row[1]
-                    key = f"{model_id}_{api}"
-                    models[key] = {
-                        "model_id": model_id,
-                        "api": api
-                    }
-            return models
-    except Exception as e:
-        logging.info(f"Ошибка загрузки моделей распознавания изображений: {e}")
-        return {}
+    if IMAGE_RECOGNITION_MODELS is None:
+        await init_rec_models()
+    
+    models = {}
+    if IMAGE_RECOGNITION_MODELS:
+        for model in IMAGE_RECOGNITION_MODELS:
+            key = f"{model['model_id']}_{model['api']}"
+            models[key] = {
+                "model_id": model['model_id'],
+                "api": model['api']
+            }
+    return models
 
 
 async def def_aspect():

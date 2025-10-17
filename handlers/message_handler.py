@@ -1,3 +1,4 @@
+import asyncio
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 from config import (Form, anthropic_clients, dp, openai_clients,
@@ -18,6 +19,28 @@ from handlers.check import (check_in_progress, clear_in_progress,
 from handlers.rate_limit import check_rate_limit
 import logging
 
+FILE_PROCESSING_UNSUPPORTED = "🚨Обработка файлов не поддерживается данной моделью."
+IMAGE_RECOGNITION_UNSUPPORTED = "🚨Распознавание изображений не поддерживается этой моделью."
+IMAGE_RECOGNITION_HANDLER_NOT_FOUND = "🚨Распознавание изображений настроено, но обработчик не найден."
+PROMPT_REQUIRED = "🔔Пожалуйста, сначала введите текстовый промпт."
+IMAGE_PROMPT_REQUIRED = "🔔Пожалуйста, введите текстовый промпт к изображению."
+
+ALLOWED_APIS = list(openai_clients.keys()) + ["g4f"]
+
+IMAGE_HANDLERS = {
+    "g4f": (Form.waiting_for_custom_image_recognition_prompt, handle_image_recognition, update_image_client_for_recognition),
+    "gemini": (Form.waiting_for_image_and_prompt, handle_image, None),
+    **{api: (Form.waiting_for_image_and_prompt_openai, handle_image_openai, None) for api in openai_clients},
+    **{api: (Form.waiting_for_image_and_prompt_anthropic, handle_image_anthropic, None) for api in anthropic_clients},
+}
+
+
+async def is_model_supported_for_image_rec(model_id, api_type, image_rec_models):
+    if api_type == "gemini":
+        return True
+    lookup_key = f"{model_id}_{api_type}"
+    return lookup_key in image_rec_models
+
 
 @dp.message()
 @access_required
@@ -31,8 +54,10 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
     if not can_proceed:
         return
         
-    user_context = await load_context(user_id)
-    current_state = await state.get_state()
+    user_context, current_state = await asyncio.gather(
+        load_context(user_id),
+        state.get_state()
+    )
     if current_state is None:
         current_state = Form.waiting_for_message
         await state.set_state(Form.waiting_for_message)
@@ -40,48 +65,29 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
     model_key = user_context["model"]
     model_id, api_type = model_key.split('_')
     
+    await set_in_progress(state, message)
     try:
-        await set_in_progress(state, message)
-        
+        image_rec_models = None
+        if current_state in [Form.waiting_for_image_and_prompt_openai, Form.waiting_for_image_and_prompt_anthropic]:
+            image_rec_models = await rec_models()
+
         if (message.voice or message.audio or message.text) and api_type == "poli" and model_id == "openai-audio":
             await handle_all_messages(message, state, audio_response=True)
-            await clear_in_progress(state, message)
             return
             
-        image_rec_models = await rec_models()
-        allowed_apis = list(openai_clients.keys()) + ["g4f"]
-
-        FILE_PROCESSING_UNSUPPORTED = "🚨Обработка файлов не поддерживается данной моделью."
-        IMAGE_RECOGNITION_UNSUPPORTED = "🚨Распознавание изображений не поддерживается этой моделью."
-        IMAGE_RECOGNITION_HANDLER_NOT_FOUND = "🚨Распознавание изображений настроено, но обработчик не найден."
-        PROMPT_REQUIRED = "🔔Пожалуйста, сначала введите текстовый промпт."
-        IMAGE_PROMPT_REQUIRED = "🔔Пожалуйста, введите текстовый промпт к изображению."
         if message.document:
-            if api_type in allowed_apis:
+            if api_type in ALLOWED_APIS:
                 await handle_files_or_urls(message, state)
             elif api_type == "gemini":
                 await handle_document_with_conversion(message, state)
             else:
                 await message.reply(FILE_PROCESSING_UNSUPPORTED)
-            await clear_in_progress(state, message)
             return
  
         if message.photo:
-            async def is_model_supported_for_image_rec(model_id, api_type, image_rec_models):
-                if api_type == "gemini":
-                    return True
-                lookup_key = f"{model_id}_{api_type}"
-                return lookup_key in image_rec_models
-
+            image_rec_models = await rec_models()
             if await is_model_supported_for_image_rec(model_id, api_type, image_rec_models):
-                image_handlers = {
-                    "g4f": (Form.waiting_for_custom_image_recognition_prompt, handle_image_recognition, update_image_client_for_recognition),
-                    "gemini": (Form.waiting_for_image_and_prompt, handle_image, None),
-                    **{api: (Form.waiting_for_image_and_prompt_openai, handle_image_openai, None) for api in openai_clients},
-                    **{api: (Form.waiting_for_image_and_prompt_anthropic, handle_image_anthropic, None) for api in anthropic_clients},
-                }
-                
-                handler_info = image_handlers.get(api_type)
+                handler_info = IMAGE_HANDLERS.get(api_type)
                 if handler_info:
                     target_state, handler_func, update_func = handler_info
                     if current_state == target_state:
@@ -95,7 +101,6 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
                     await message.reply(IMAGE_RECOGNITION_HANDLER_NOT_FOUND)
             else:
                 await message.reply(IMAGE_RECOGNITION_UNSUPPORTED)
-            await clear_in_progress(state, message)
             return
  
         if current_state == Form.waiting_for_message:
@@ -120,12 +125,11 @@ async def handle_all_messages_handler(message: types.Message, state: FSMContext)
         else:
             await handle_all_messages(message, state)
             
-        await clear_in_progress(state, message)
     except ValueError as e:
-        await clear_in_progress(state, message)
         logging.error(f"🚨Ошибка конфигурации или данных: {e}")
         await message.reply(f"🚨Ошибка конфигурации или данных: {e}")
     except Exception as e:
-        await clear_in_progress(state, message)
         logging.error(f"🚨Произошла непредвиденная ошибка: {e}")
         await message.reply("🚨Произошла непредвиденная ошибка.")
+    finally:
+        await clear_in_progress(state, message)
