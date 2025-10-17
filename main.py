@@ -97,7 +97,7 @@ async def main():
 
             await asyncio.Event().wait()
         else:
-            await dp.start_polling(bot, skip_updates=True)
+            await dp.start_polling(bot, skip_updates=True, fast=True)
 
     except Exception as e:
         logging.error(f"Ошибка во время выполнения бота: {e}", exc_info=True)
