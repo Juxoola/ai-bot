@@ -334,7 +334,7 @@ async def _process_gemini_message(message: types.Message, state: FSMContext, use
                 if image_prompt:
                     await clear_in_progress(state, message)
                     
-                    await message.reply("🎨 Отличная идея! Начинаю рисовать...")
+                    await message.reply("🎨 Начинаю рисовать...")
                     
                     await state.update_data(image_generation_prompt=image_prompt, is_direct_image_gen=True)
                     
@@ -355,6 +355,7 @@ async def _process_gemini_message(message: types.Message, state: FSMContext, use
                 
                 search_query = function_call.args.get('query')
                 if search_query:
+                    await message.reply("🔍 Начинаю поиск...")
                     search_results = await search_tool(search_query)
                     
                     function_response = genai_types.Part(
@@ -467,7 +468,7 @@ async def _process_openai_text_message(message: types.Message, state: FSMContext
                 return None
 
             if image_prompt:
-                await message.reply("🎨 Отличная идея! Начинаю рисовать...")
+                await message.reply("🎨 Начинаю рисовать...")
                 await clear_in_progress(state, message)
                 await state.update_data(image_generation_prompt=image_prompt, is_direct_image_gen=True)
                 
@@ -500,6 +501,7 @@ async def _process_openai_text_message(message: types.Message, state: FSMContext
                 return None
 
             if search_query:
+                await message.reply("🔍 Начинаю поиск...")
                 search_results = await search_tool(search_query)
                 
                 message_dict = response_message.model_dump()
@@ -691,13 +693,13 @@ image_generation_tool = {
     "type": "function",
     "function": {
         "name": "generate_image",
-        "description": "Создает изображение на основе текстового описания. Использовать, когда пользователь просит нарисовать, сгенерировать, создать или показать изображение.",
+        "description": "Создает изображение на основе текстового описания. Использовать, когда пользователь просит нарисовать, сгенерировать, создать или показать изображение/",
         "parameters": {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "Детальное, творческое описание изображения для генерации. Должно быть на английском языке для лучших результатов."
+                    "description": "Детальное, творческое описание изображения для генерации. Должно быть на английском языке и содержать как можно больше деталей о стиле, объектах и окружении."
                 }
             },
             "required": ["prompt"]
@@ -713,7 +715,7 @@ gemini_image_generation_tool = {
         "properties": {
             "prompt": {
                 "type": "string",
-                "description": "Детальное, творческое описание изображения для генерации. Для лучших результатов должно быть на английском языке и содержать как можно больше деталей о стиле, объектах и окружении."
+                "description": "Детальное, творческое описание изображения для генерации. Должно быть на английском языке и содержать как можно больше деталей о стиле, объектах и окружении."
             }
         },
         "required": ["prompt"]
@@ -740,13 +742,13 @@ search_web_tool = {
 
 gemini_search_web_tool = {
     "name": "search_web",
-    "description": "Выполняет веб-поиск для получения актуальной информации.",
+    "description": "Выполняет веб-поиск для получения актуальной информации  или поиска ответов на вопросы, требующие свежих данных.",
     "parameters": {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Поисковый запрос."
+                "description": "Поисковый запрос. Должен быть максимально точным и информативным."
             }
         },
         "required": ["query"]
