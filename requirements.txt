@@ -21,3 +21,4 @@ xlrd
 openpyxl
 browser_cookie3
 ddgs
+cryptography

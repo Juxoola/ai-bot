@@ -9,6 +9,7 @@ from io import BytesIO
 
 import aiohttp
 import aiosqlite
+from func.crypto import encrypt_text_for_user, decrypt_text_for_user
 from cachetools import TTLCache
 from config import (DEFAULT_SYSTEM_PROMPTS, providers_config,
                     update_image_gen_client, update_user_clients, get_system_prompt_with_date)
@@ -301,7 +302,7 @@ async def clear_all_user_contexts():
             else:
                 messages = json.dumps([{"role": "system", "content": system_prompt}])
             
-            update_params.append((messages, user_id))
+            update_params.append((encrypt_text_for_user(user_id, messages), user_id))
         
         await db.executemany(
             """
@@ -338,7 +339,7 @@ async def reset_user_context(user_id):
             SET messages = ?, long_message = '', g4f_image_base64 = NULL
             WHERE user_id = ?
             """,
-            (messages, user_id)
+            (encrypt_text_for_user(user_id, messages), user_id)
         )
         await db.commit()
 
@@ -387,10 +388,19 @@ async def load_context(user_id):
         row = await cursor.fetchone()
 
     if row:
+        # Расшифровка полей messages и long_message (с обратной совместимостью)
+        decrypted_messages_str = decrypt_text_for_user(user_id, row[1]) if row[1] is not None else "[]"
+        try:
+            messages_obj = json.loads(decrypted_messages_str)
+        except Exception:
+            messages_obj = [{"role": "system", "content": get_system_prompt_with_date(DEFAULT_SYSTEM_PROMPTS["default"])}]
+
+        decrypted_long_message = decrypt_text_for_user(user_id, row[4]) if row[4] else ""
+
         context = {
-            "model": f"{row[0]}_{row[2]}", "messages": json.loads(row[1]), "api_type": row[2],
+            "model": f"{row[0]}_{row[2]}", "messages": messages_obj, "api_type": row[2],
             "g4f_image": BytesIO(base64.b64decode(row[3])) if row[3] else None,
-            "long_message": row[4], "image_generation_model": row[5], "aspect_ratio": row[6],
+            "long_message": decrypted_long_message, "image_generation_model": row[5], "aspect_ratio": row[6],
             "enhance": bool(row[7]), "show_processing_time": bool(row[8]),
             "voice": row[9] or DEFAULT_VOICE, "system_role": row[10] or "default"
         }
@@ -417,9 +427,10 @@ async def save_context(user_id, context):
                         context_to_save["g4f_image"].getvalue()
                     ).decode("utf-8")
                 
-                messages_json = json.dumps(context_to_save["messages"],
+                messages_json_plain = json.dumps(context_to_save["messages"],
                                           ensure_ascii=False,
                                           separators=(',', ':'))
+                messages_json = encrypt_text_for_user(user_id, messages_json_plain)
                 await cursor.execute(
                     """
                     INSERT INTO user_contexts (
@@ -447,7 +458,7 @@ async def save_context(user_id, context):
                         messages_json,
                         context_to_save["api_type"],
                         g4f_image_base64,
-                        context_to_save["long_message"],
+                        encrypt_text_for_user(user_id, context_to_save["long_message"]),
                         context_to_save["image_generation_model"],
                         context_to_save["aspect_ratio"],
                         int(context_to_save["enhance"]),
